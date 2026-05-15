@@ -8,6 +8,9 @@ const isFormData = (value) => typeof FormData !== "undefined" && value instanceo
 const FIRST_LOGIN_ERROR_MESSAGE =
   "First login setup incomplete. Verify email and change password first.";
 
+const isFirstLoginErrorMessage = (message) =>
+  String(message || "").toLowerCase().includes("first login setup incomplete");
+
 function createApiError(message, status) {
   const error = new Error(message);
   error.status = status;
@@ -16,7 +19,10 @@ function createApiError(message, status) {
     error.code = "UNAUTHORIZED";
   }
 
-  if (status === 403 && message === FIRST_LOGIN_ERROR_MESSAGE) {
+  if (
+    status === 403 &&
+    (message === FIRST_LOGIN_ERROR_MESSAGE || isFirstLoginErrorMessage(message))
+  ) {
     error.code = "FIRST_LOGIN_INCOMPLETE";
   }
 

@@ -337,6 +337,13 @@ const mergeUserPayload = (baseUser, incomingUser) => ({
     null,
 });
 
+const markUserForFirstLoginSetup = (user) => ({
+  ...user,
+  account_type: user?.account_type || "user",
+  role: user?.role || "parent_admin",
+  is_first_login: true,
+});
+
 export function ProfileProvider({ children }) {
   const [profile, setProfile] = useState(defaultProfile);
   const [authToken, setAuthToken] = useState("");
@@ -579,6 +586,10 @@ export function ProfileProvider({ children }) {
           if (error?.code === "UNAUTHORIZED") {
             throw error;
           }
+
+          if (error?.code === "FIRST_LOGIN_INCOMPLETE") {
+            resolvedUser = markUserForFirstLoginSetup(loginUser);
+          }
         }
 
         setAuthToken(response.access_token);
@@ -592,7 +603,7 @@ export function ProfileProvider({ children }) {
         setDeviceChildrenByDevice({});
         await persistSession(response.access_token, resolvedUser);
 
-        if (isParentAdmin(resolvedUser)) {
+        if (isParentAdminReady(resolvedUser)) {
           await fetchChildrenForUser(resolvedUser, response.access_token);
         }
 
@@ -605,7 +616,7 @@ export function ProfileProvider({ children }) {
         setIsSubmitting(false);
       }
     },
-    [applyCurrentUser, persistSession]
+    [applyCurrentUser, fetchChildrenForUser, persistSession]
   );
 
   const logout = useCallback(async () => {
@@ -653,7 +664,14 @@ export function ProfileProvider({ children }) {
         setIsSubmitting(false);
       }
     },
-    [applyCurrentUser, authToken, currentUser, handleProtectedError, persistSession]
+    [
+      applyCurrentUser,
+      authToken,
+      currentUser,
+      fetchChildrenForUser,
+      handleProtectedError,
+      persistSession,
+    ]
   );
 
   const createChild = useCallback(
@@ -989,8 +1007,18 @@ export function ProfileProvider({ children }) {
           applyCurrentUser(parsedUser);
         }
 
-        const me = await authService.getMe(storedToken);
-        const mergedUser = mergeUserPayload(parsedUser, me);
+        let mergedUser = parsedUser;
+
+        try {
+          const me = await authService.getMe(storedToken);
+          mergedUser = mergeUserPayload(parsedUser, me);
+        } catch (error) {
+          if (error?.code !== "FIRST_LOGIN_INCOMPLETE") {
+            throw error;
+          }
+
+          mergedUser = markUserForFirstLoginSetup(parsedUser);
+        }
 
         if (!isMounted) {
           return;
