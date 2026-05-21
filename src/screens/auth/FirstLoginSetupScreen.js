@@ -22,7 +22,7 @@ const passwordChecks = [
 ];
 
 export default function FirstLoginSetupScreen({ navigation }) {
-  const { authToken, completeFirstLogin, currentUser, isSubmitting } = useAuth();
+  const { authToken, completeFirstLogin, currentUser, isSubmitting, logout } = useAuth();
   const [email, setEmail] = useState(currentUser?.email || "");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
@@ -158,10 +158,11 @@ export default function FirstLoginSetupScreen({ navigation }) {
         otp: otpValue,
         new_password: newPassword,
       });
+      await logout();
 
       navigation.reset({
         index: 0,
-        routes: [{ name: "Profile" }],
+        routes: [{ name: "AuthProfile" }],
       });
     } catch (error) {
       Alert.alert("Unable to finish setup", error.message);

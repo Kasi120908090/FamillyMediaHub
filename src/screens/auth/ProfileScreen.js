@@ -91,15 +91,15 @@ export default function ProfileScreen({ navigation }) {
   const [adminPasswordError, setAdminPasswordError] = useState("");
   const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
   const [showAccessDeniedModal, setShowAccessDeniedModal] = useState(false);
+  const [showParentImportModal, setShowParentImportModal] = useState(false);
+  const [parentLoginId, setParentLoginId] = useState("");
+  const [parentImportPassword, setParentImportPassword] = useState("");
+  const [parentImportPasswordVisible, setParentImportPasswordVisible] = useState(false);
+  const [parentImportError, setParentImportError] = useState("");
+  const [isImportingParent, setIsImportingParent] = useState(false);
   const childUser = isChildAccount(currentUser);
   const parentReady = isParentAdminReady(currentUser);
   const cardWidth = Math.min(84, Math.max(74, (width - 74) / 4));
-
-  useEffect(() => {
-    if (parentReady && currentUser?.id) {
-      refreshChildren().catch(() => {});
-    }
-  }, [currentUser?.id, parentReady, refreshChildren]);
 
   useEffect(() => {
     let isMounted = true;
@@ -211,21 +211,24 @@ export default function ProfileScreen({ navigation }) {
       return [];
     }
 
-    return uniqueProfiles([
-      ...baseProfiles,
-      {
-        id: "add-user-card",
-        name: "Add User",
-        role: isAuthenticated && parentReady ? "Create profile" : "Admin only",
-        image: "",
-        loginId: "",
-        isAddCard: true,
-      },
-    ]);
+    const parentProfiles = baseProfiles.filter((p) => p.isParent);
+    const memberProfiles = baseProfiles.filter((p) => !p.isParent);
+
+    const addCard = {
+      id: "add-user-card",
+      name: "Add User",
+      role: isAuthenticated && parentReady ? "Create profile" : "Admin only",
+      image: "",
+      loginId: "",
+      isAddCard: true,
+    };
+
+    return uniqueProfiles([...parentProfiles, ...memberProfiles, addCard]);
   }, [cachedProfiles, familyProfiles, isAuthenticated, parentReady]);
 
   const showCachedProfilesLoader =
     isBootstrapping || (!isAuthenticated && isLoadingCachedProfiles);
+  const needsParentImport = !isAuthenticated && !cachedProfiles.length;
 
   const adminCandidateProfile = useMemo(
     () =>
@@ -259,6 +262,54 @@ export default function ProfileScreen({ navigation }) {
 
   const getPostLoginRoute = (routeName) =>
     routeName === "FirstLoginSetup" ? "FirstLoginSetup" : "Gallery";
+
+  const closeParentImportModal = () => {
+    setShowParentImportModal(false);
+    setParentLoginId("");
+    setParentImportPassword("");
+    setParentImportPasswordVisible(false);
+    setParentImportError("");
+  };
+
+  const handleParentImport = async () => {
+    if (!parentLoginId.trim()) {
+      setParentImportError("Parent username or email is required.");
+      return;
+    }
+
+    if (!parentImportPassword.trim()) {
+      setParentImportError("Parent password is required.");
+      return;
+    }
+
+    try {
+      setIsImportingParent(true);
+      setParentImportError("");
+      const response = await login({
+        username: parentLoginId.trim(),
+        password: parentImportPassword.trim(),
+      });
+
+      closeParentImportModal();
+
+      if (response?.route === "FirstLoginSetup") {
+        navigation.reset({
+          index: 0,
+          routes: [{ name: "FirstLoginSetup" }],
+        });
+        return;
+      }
+
+      Alert.alert(
+        "Profiles synced",
+        "The family profiles are now available on this device. Tap the parent profile card to continue into the app."
+      );
+    } catch (error) {
+      setParentImportError(error.message || "Unable to sync the parent profile.");
+    } finally {
+      setIsImportingParent(false);
+    }
+  };
 
   const handleGuestContinue = async () => {
     if (!selectedGuestProfile?.loginId) {
@@ -348,26 +399,14 @@ export default function ProfileScreen({ navigation }) {
       return;
     }
 
-    if (!isAuthenticated) {
-      if (!item.loginId) {
-        Alert.alert("Profile unavailable", "This profile does not have a saved login id yet.");
-        return;
-      }
-
-      setSelectedGuestProfile(item);
-      setSelectedActionMode("open-profile");
-      setGuestPassword("");
-      setGuestPasswordError("");
-      return;
-    }
-    
     if (!item.loginId) {
       Alert.alert("Profile unavailable", "This profile does not have a saved login id yet.");
       return;
     }
 
     setSelectedGuestProfile(item);
-    setSelectedActionMode("open-profile");
+    // Default action mode is open-profile
+    setSelectedActionMode("open-profile"); 
     setGuestPassword("");
     setGuestPasswordError("");
   };
@@ -375,13 +414,13 @@ export default function ProfileScreen({ navigation }) {
   const rightSlot = isAuthenticated ? (
     <View style={styles.rightHeaderRow}>
       <View style={styles.smallIconButton}>
-        <Ionicons name="notifications-outline" size={18} color="#5A35F0" />
+        <Ionicons name="notifications-outline" size={28} color="#5A35F0" />
       </View>
       <ThemedAvatar uri={profile.image} name={profile.name} style={styles.headerAvatar} />
     </View>
   ) : (
     <View style={styles.smallIconButton}>
-      <Ionicons name="notifications-outline" size={18} color="#5A35F0" />
+      <Ionicons name="notifications-outline" size={28} color="#5A35F0" />
     </View>
   );
 
@@ -392,6 +431,7 @@ export default function ProfileScreen({ navigation }) {
           <SectionTitle
             title={"Who's using\nFamily Media Hub?"}
             subtitle="Choose a profile to continue. Every profile requires its password before opening the account."
+            titleStyle={styles.heroTitle}
           />
         </View>
         <FamilyHeroIllustration />
@@ -415,16 +455,16 @@ export default function ProfileScreen({ navigation }) {
               </>
             )}
           </TouchableOpacity>
-        ) : (
+        ) : needsParentImport ? (
           <TouchableOpacity
             activeOpacity={0.85}
-            onPress={() => navigation.navigate("Login")}
+            onPress={() => setShowParentImportModal(true)}
             style={styles.editPill}
           >
-            <Text style={styles.editPillText}>Sign In</Text>
-            <Ionicons name="log-in-outline" size={12} color="#6E4CDE" />
+            <Text style={styles.editPillText}>Import Parent</Text>
+            <Ionicons name="cloud-download-outline" size={12} color="#6E4CDE" />
           </TouchableOpacity>
-        )}
+        ) : null}
       </View>
 
       {showCachedProfilesLoader ? (
@@ -480,39 +520,81 @@ export default function ProfileScreen({ navigation }) {
         <FlowCard style={styles.emptyStateCard}>
           <Text style={styles.emptyStateTitle}>No saved family profiles yet</Text>
           <Text style={styles.emptyStateText}>
-            Sign in once with the parent account on this device. After that, the parent and child
-            accounts will appear here whenever the app starts.
+            Import the parent account once on this device. After that, the parent and child
+            profiles will appear here whenever the app starts.
           </Text>
           <PrimaryAction
-            label="Sign In With Parent Account"
-            onPress={() => navigation.navigate("Login")}
-            icon="log-in-outline"
+            label="Import Parent Profile"
+            onPress={() => setShowParentImportModal(true)}
+            icon="cloud-download-outline"
           />
         </FlowCard>
       )}
-
-      {!isAuthenticated && !showCachedProfilesLoader && visibleProfiles.length ? (
-        <FlowCard style={styles.guestActionCard}>
-          <Text style={styles.guestActionTitle}>Need the latest family accounts?</Text>
-          <Text style={styles.guestActionText}>
-            Sign in with the parent account once to sync the newest parent and child profiles from
-            the database to this device.
-          </Text>
-          <PrimaryAction
-            label="Sign In With Parent Account"
-            onPress={() => navigation.navigate("Login")}
-            icon="log-in-outline"
-          />
-        </FlowCard>
-      ) : null}
 
       <InfoBanner
         text={
           isAuthenticated
             ? "Tap any parent or child profile, enter the password, and then the app will open that account."
-            : "Saved profiles open from this screen. Sign in as the parent once on this device to refresh the latest family accounts."
+            : needsParentImport
+            ? "Import the parent account once on this device. After that, the saved parent profiles will open from this screen directly."
+            : "Tap the saved parent profile, enter the password, and continue into the app."
         }
       />
+
+      <Modal visible={showParentImportModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.modalKeyboardWrap}
+          >
+            <FlowCard style={styles.modalCard}>
+              <View style={styles.modalIllustrationWrap}>
+                <FamilyHeroIllustration />
+              </View>
+              <Text style={styles.modalTitle}>Import Parent Profile</Text>
+              <Text style={styles.modalSubtitle}>
+                Use the parent account once to load the saved family profiles from the database to
+                this device. After that, this screen becomes your main entry flow.
+              </Text>
+              <FlowInput
+                value={parentLoginId}
+                onChangeText={(value) => {
+                  setParentLoginId(value);
+                  if (parentImportError) {
+                    setParentImportError("");
+                  }
+                }}
+                placeholder="Enter parent username or email"
+                icon="person-outline"
+                autoCapitalize="none"
+                autoCorrect={false}
+              />
+              <FlowInput
+                value={parentImportPassword}
+                onChangeText={(value) => {
+                  setParentImportPassword(value);
+                  if (parentImportError) {
+                    setParentImportError("");
+                  }
+                }}
+                placeholder="Enter parent password"
+                icon="lock-closed-outline"
+                secureTextEntry
+                secureVisible={parentImportPasswordVisible}
+                onToggleSecure={() => setParentImportPasswordVisible((current) => !current)}
+                error={parentImportError}
+              />
+              <PrimaryAction
+                label="Import Profiles"
+                onPress={handleParentImport}
+                loading={isImportingParent}
+                icon="cloud-download-outline"
+              />
+              <SecondaryAction label="Cancel" onPress={closeParentImportModal} />
+            </FlowCard>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
 
       <Modal visible={Boolean(selectedGuestProfile)} transparent animationType="fade">
         <View style={styles.modalOverlay}>
@@ -656,15 +738,22 @@ const styles = StyleSheet.create({
     alignItems: "flex-end",
     justifyContent: "space-between",
     marginBottom: 14,
+    marginTop: 20,
   },
   heroCopy: {
     flex: 1,
     paddingRight: 12,
+    
+  },
+  heroTitle: {
+    fontSize: 27,
+    lineHeight: 31,
   },
   rightHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 8,
+    
   },
   smallIconButton: {
     width: 30,
@@ -675,17 +764,20 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
     borderColor: "#EEE6FF",
+    
   },
   headerAvatar: {
     width: 30,
     height: 30,
     borderRadius: 15,
+    
   },
   sectionHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginBottom: 12,
+    marginTop: 32,
   },
   sectionEyebrow: {
     fontSize: 12,
@@ -711,8 +803,9 @@ const styles = StyleSheet.create({
   profileGrid: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
     rowGap: 12,
+    columnGap: 12,
   },
   profileCard: {
     minHeight: 132,

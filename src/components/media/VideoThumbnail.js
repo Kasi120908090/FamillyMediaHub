@@ -35,7 +35,7 @@ function VideoFrameThumbnail({ item }) {
         style={styles.media}
         contentFit="cover"
         nativeControls={false}
-        allowsFullscreen={false}
+        fullscreenOptions={{ enable: false }}
         surfaceType="textureView"
         useExoShutter={false}
         onFirstFrameRender={() => setHasFrame(true)}

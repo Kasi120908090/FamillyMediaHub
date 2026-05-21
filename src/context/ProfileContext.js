@@ -8,6 +8,7 @@ import React, {
   useRef,
   useState,
 } from "react";
+import { InteractionManager } from "react-native";
 import { APP_AVATAR_FALLBACK } from "../config/env";
 import { authService } from "../services/authService";
 import { mediaService } from "../services/mediaService";
@@ -359,6 +360,7 @@ export function ProfileProvider({ children }) {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const childrenListRef = useRef([]);
+  const initialRefreshKeyRef = useRef("");
 
   useEffect(() => {
     childrenListRef.current = childrenList;
@@ -772,7 +774,7 @@ export function ProfileProvider({ children }) {
   );
 
   const cancelMediaUpload = useCallback(
-    async (uploadId) => {
+    async (uploadId, options = {}) => {
       if (!authToken) {
         throw new Error("Please sign in first.");
       }
@@ -782,7 +784,7 @@ export function ProfileProvider({ children }) {
       }
 
       try {
-        return await mediaService.cancelUpload(uploadId, authToken);
+        return await mediaService.cancelUpload(uploadId, authToken, options);
       } catch (error) {
         return handleProtectedError(error);
       }
@@ -1049,29 +1051,58 @@ export function ProfileProvider({ children }) {
 
   useEffect(() => {
     if (!authToken || !currentUser) {
+      initialRefreshKeyRef.current = "";
       return;
     }
+
+    let isCancelled = false;
+    const refreshKey = [
+      authToken,
+      currentUser?.id || "user",
+      childAccount ? "child" : "parent",
+      loggedInChildId || "all",
+      parentAdminReady ? "admin-ready" : "standard",
+    ].join(":");
+
+    if (initialRefreshKeyRef.current === refreshKey) {
+      return;
+    }
+
+    initialRefreshKeyRef.current = refreshKey;
 
     if (childAccount && loggedInChildId) {
       selectChild(loggedInChildId).catch(() => {});
       refreshChildren().catch(() => {});
-      return;
+      return () => {
+        isCancelled = true;
+      };
     }
 
     if (parentAdminReady) {
-      refreshChildren().catch(() => {});
-      refreshDevices().catch(() => {});
-      loadChildMedia(null).catch(() => {});
-      return;
+      const task = InteractionManager.runAfterInteractions(() => {
+        if (isCancelled) {
+          return;
+        }
+
+        refreshChildren().catch(() => {});
+        refreshDevices().catch(() => {});
+      });
+
+      return () => {
+        isCancelled = true;
+        task.cancel();
+      };
     }
 
     setParentDevices([]);
     setDeviceChildrenByDevice({});
+    return () => {
+      isCancelled = true;
+    };
   }, [
     authToken,
     childAccount,
     currentUser,
-    loadChildMedia,
     loggedInChildId,
     parentAdminReady,
     refreshChildren,

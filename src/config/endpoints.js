@@ -25,6 +25,17 @@ export const ENDPOINTS = {
     upload: "/users/media/upload",
     cancelUpload: (uploadId) =>
       `/users/media/upload/${encodeURIComponent(uploadId)}/cancel`,
+    initUpload: "/users/media/uploads/init",
+    uploadChunk: (uploadId) =>
+      `/users/media/uploads/${encodeURIComponent(uploadId)}/chunk`,
+    uploadStatus: (uploadId) =>
+      `/users/media/uploads/${encodeURIComponent(uploadId)}/status`,
+    completeUpload: (uploadId) =>
+      `/users/media/uploads/${encodeURIComponent(uploadId)}/complete`,
+    cancelChunkedUpload: (uploadId) =>
+      `/users/media/uploads/${encodeURIComponent(uploadId)}`,
+    videoStream: (mediaId) =>
+      `/users/media/video/${encodeURIComponent(mediaId)}/stream`,
     listForParent: (category) =>
       `/users/media/parent${category ? `?category=${encodeURIComponent(category)}` : ""}`,
     listForChild: (childId, category) =>
@@ -43,5 +54,19 @@ export const ENDPOINTS = {
       const query = params.toString();
       return `/users/media/devices/${deviceId}${query ? `?${query}` : ""}`;
     },
+  },
+  backup: {
+    health: "/health",
+    init: "/backup/init",
+    upload: (uploadId) => `/backup/upload/${encodeURIComponent(uploadId)}`,
+    status: (uploadId) => `/backup/status/${encodeURIComponent(uploadId)}`,
+    complete: (uploadId) => `/backup/complete/${encodeURIComponent(uploadId)}`,
+    fileStatus: (sha256Hash, deviceId) =>
+      `/backup/file-status/${encodeURIComponent(sha256Hash)}${
+        deviceId !== undefined && deviceId !== null
+          ? `?device_id=${encodeURIComponent(deviceId)}`
+          : ""
+      }`,
+    list: "/backup/list",
   },
 };

@@ -14,8 +14,9 @@ import { Ionicons } from "@expo/vector-icons";
 import * as DocumentPicker from "expo-document-picker";
 import * as ImagePicker from "expo-image-picker";
 import * as Location from "expo-location";
-import AppHeader from "../../components/navigation/AppHeader";
 import VideoPlayer from "../../components/media/VideoPlayer";
+import { softShadow, ui } from "../../components/media/MediaDesign";
+import { mediaService } from "../../services/mediaService";
 import { useAuth } from "../../hooks/useAuth";
 import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
 import { isParentAdminReady } from "../../utils/auth";
@@ -38,6 +39,20 @@ const uploadActionTextByCategory = {
   file: "Upload File",
 };
 
+const formatBytes = (bytes = 0) => {
+  const value = Number(bytes || 0);
+
+  if (!value) {
+    return "";
+  }
+
+  if (value < 1024 * 1024) {
+    return `${Math.max(1, Math.round(value / 1024))} KB`;
+  }
+
+  return `${(value / (1024 * 1024)).toFixed(value > 10 * 1024 * 1024 ? 0 : 1)} MB`;
+};
+
 const createUploadId = () =>
   `upload-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 
@@ -54,16 +69,24 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
     cancelMediaUpload,
     isSubmitting,
   } = useAuth();
-  const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedFiles, setSelectedFiles] = useState([]);
   const [category, setCategory] = useState("image");
   const [selectedDeviceId, setSelectedDeviceId] = useState(null);
   const [selectedUploadChildId, setSelectedUploadChildId] = useState(null);
   const [isUploadStarting, setIsUploadStarting] = useState(false);
   const [isPickingFile, setIsPickingFile] = useState(false);
   const [activeUploadId, setActiveUploadId] = useState(null);
+  const [activeUploadMode, setActiveUploadMode] = useState("standard");
+  const [uploadProgress, setUploadProgress] = useState(0);
   const [isCancellingUpload, setIsCancellingUpload] = useState(false);
   const uploadAbortControllerRef = useRef(null);
   const uploadCancelRequestedRef = useRef(false);
+  const lastProgressRef = useRef(0);
+  const activeUploadIdRef = useRef(null);
+  const activeUploadModeRef = useRef("standard");
+  const [activeUploadFileName, setActiveUploadFileName] = useState("");
+  const [activeUploadIndex, setActiveUploadIndex] = useState(0);
+  const [activeUploadTotal, setActiveUploadTotal] = useState(0);
 
   const isParentAccount = isParentAdminReady(currentUser);
   const loggedInChildId =
@@ -78,6 +101,8 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
     currentUser?.id ||
     null;
   const isViewOnly = !canManageMedia;
+  const selectedFile = selectedFiles[0] || null;
+  const selectedFileCount = selectedFiles.length;
 
   useEffect(() => {
     if (isParentAccount) {
@@ -88,7 +113,7 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
   useEffect(() => {
     if (initialCategory && initialCategory !== category) {
       setCategory(initialCategory);
-      setSelectedFile(null);
+      setSelectedFiles([]);
     }
   }, [initialCategory]);
 
@@ -101,6 +126,10 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
   }, [isParentAccount, loggedInChildId, profile.name]);
 
   const uploadInProgress = isUploadStarting || isSubmitting;
+  const canShowCancelUpload = uploadInProgress && !isViewOnly;
+  const selectedFileUsesChunkedUpload = selectedFile
+    ? selectedFiles.some((file) => mediaService.shouldUseChunkedUpload({ category, file }))
+    : false;
 
   useEffect(() => {
     if (!isParentAccount) {
@@ -133,7 +162,7 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
       if (activeCategory === "file") {
         const result = await DocumentPicker.getDocumentAsync({
           copyToCacheDirectory: true,
-          multiple: false,
+          multiple: true,
           type: "*/*",
         });
 
@@ -141,12 +170,14 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
           return;
         }
 
-        const asset = result.assets[0];
-        setSelectedFile({
-          uri: asset.uri,
-          name: asset.name || `file-${Date.now()}`,
-          type: asset.mimeType || "application/octet-stream",
-        });
+        setSelectedFiles(
+          result.assets.map((asset, index) => ({
+            uri: asset.uri,
+            name: asset.name || `file-${Date.now()}-${index + 1}`,
+            type: asset.mimeType || "application/octet-stream",
+            size: asset.size || asset.fileSize || 0,
+          }))
+        );
         return;
       }
 
@@ -164,18 +195,21 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: mediaTypeOption,
+        allowsMultipleSelection: true,
         quality: 1,
       });
 
       if (!result.canceled && result.assets?.length) {
-        const asset = result.assets[0];
-        setSelectedFile({
-          uri: asset.uri,
-          name:
-            asset.fileName ||
-            `${activeCategory}-${Date.now()}.${activeCategory === "video" ? "mp4" : "jpg"}`,
-          type: asset.mimeType || (activeCategory === "video" ? "video/mp4" : "image/jpeg"),
-        });
+        setSelectedFiles(
+          result.assets.map((asset, index) => ({
+            uri: asset.uri,
+            name:
+              asset.fileName ||
+              `${activeCategory}-${Date.now()}-${index + 1}.${activeCategory === "video" ? "mp4" : "jpg"}`,
+            type: asset.mimeType || (activeCategory === "video" ? "video/mp4" : "image/jpeg"),
+            size: asset.fileSize || asset.size || 0,
+          }))
+        );
       }
     } finally {
       setIsPickingFile(false);
@@ -203,20 +237,25 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
       return;
     }
 
-    if (!selectedFile) {
+    if (!selectedFiles.length) {
       Alert.alert("File required", "Choose a file to upload first.");
       return;
     }
 
-    const uploadId = createUploadId();
     const abortController =
       typeof AbortController !== "undefined" ? new AbortController() : null;
 
     uploadAbortControllerRef.current = abortController;
     uploadCancelRequestedRef.current = false;
-    setActiveUploadId(uploadId);
+    activeUploadIdRef.current = null;
+    activeUploadModeRef.current = "standard";
+    setActiveUploadId(null);
+    setActiveUploadMode("standard");
+    setUploadProgress(0);
+    lastProgressRef.current = 0;
     setIsCancellingUpload(false);
     setIsUploadStarting(true);
+    setActiveUploadTotal(selectedFiles.length);
 
     let locationPayload = {};
 
@@ -259,16 +298,67 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
     }
 
     try {
-      await uploadMedia({
-        upload_id: uploadId,
-        child_id: isParentAccount ? undefined : loggedInChildId,
-        device_id: isParentAccount && selectedDeviceId ? selectedDeviceId : undefined,
-        category,
-        file: selectedFile,
-        ...locationPayload,
-      }, { signal: abortController?.signal });
-      Alert.alert("Upload complete", "Your media was uploaded successfully.");
-      setSelectedFile(null);
+      if (uploadCancelRequestedRef.current || abortController?.signal?.aborted) {
+        const abortError = new Error("Upload cancelled");
+        abortError.name = "AbortError";
+        throw abortError;
+      }
+
+      for (let fileIndex = 0; fileIndex < selectedFiles.length; fileIndex += 1) {
+        const file = selectedFiles[fileIndex];
+        const uploadId = createUploadId();
+        const willUseChunkedUpload = mediaService.shouldUseChunkedUpload({
+          category,
+          file,
+        });
+
+        activeUploadIdRef.current = uploadId;
+        activeUploadModeRef.current = willUseChunkedUpload ? "chunked" : "standard";
+        setActiveUploadId(uploadId);
+        setActiveUploadMode(willUseChunkedUpload ? "chunked" : "standard");
+        setActiveUploadFileName(file.name);
+        setActiveUploadIndex(fileIndex + 1);
+        lastProgressRef.current = 0;
+        setUploadProgress(fileIndex / selectedFiles.length);
+
+        await uploadMedia({
+          upload_id: uploadId,
+          child_id: isParentAccount ? undefined : loggedInChildId,
+          device_id: isParentAccount && selectedDeviceId ? selectedDeviceId : undefined,
+          category,
+          file,
+          ...locationPayload,
+        }, {
+          signal: abortController?.signal,
+          onUploadStart: ({ uploadId: serverUploadId, mode }) => {
+            if (serverUploadId) {
+              activeUploadIdRef.current = serverUploadId;
+              setActiveUploadId(serverUploadId);
+            }
+            activeUploadModeRef.current = mode || "standard";
+            setActiveUploadMode(mode || "standard");
+          },
+          onProgress: ({ progress }) => {
+            const itemProgress = Math.max(0, Math.min(1, Number(progress) || 0));
+            const overallProgress = (fileIndex + itemProgress) / selectedFiles.length;
+            if (
+              overallProgress === 1 ||
+              overallProgress - lastProgressRef.current >= 0.03
+            ) {
+              lastProgressRef.current = overallProgress;
+              setUploadProgress(overallProgress);
+            }
+          },
+        });
+      }
+
+      Alert.alert(
+        "Upload complete",
+        selectedFiles.length === 1
+          ? "Your media was uploaded successfully."
+          : `${selectedFiles.length} items were uploaded successfully.`
+      );
+      setSelectedFiles([]);
       navigation.navigate(uploadDestinationByCategory[category] || "Gallery");
     } catch (error) {
       if (uploadCancelRequestedRef.current || error?.name === "AbortError") {
@@ -279,43 +369,61 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
     } finally {
       uploadAbortControllerRef.current = null;
       uploadCancelRequestedRef.current = false;
+      activeUploadIdRef.current = null;
+      activeUploadModeRef.current = "standard";
       setActiveUploadId(null);
+      setActiveUploadMode("standard");
+      setActiveUploadFileName("");
+      setActiveUploadIndex(0);
+      setActiveUploadTotal(0);
+      setUploadProgress(0);
       setIsCancellingUpload(false);
       setIsUploadStarting(false);
     }
   };
 
   const handleCancelUpload = async () => {
-    if (!activeUploadId || isCancellingUpload) {
+    const uploadIdToCancel = activeUploadIdRef.current || activeUploadId;
+    const uploadModeToCancel = activeUploadModeRef.current || activeUploadMode;
+
+    if (isCancellingUpload || !uploadInProgress) {
       return;
     }
 
     setIsCancellingUpload(true);
+    uploadCancelRequestedRef.current = true;
+    uploadAbortControllerRef.current?.abort();
+
+    if (!uploadIdToCancel) {
+      return;
+    }
 
     try {
-      await cancelMediaUpload(activeUploadId);
-      uploadCancelRequestedRef.current = true;
-      uploadAbortControllerRef.current?.abort();
+      await cancelMediaUpload(uploadIdToCancel, {
+        chunked: uploadModeToCancel === "chunked",
+      });
     } catch (error) {
-      setIsCancellingUpload(false);
-      Alert.alert("Cancel failed", error.message);
+      if (!uploadCancelRequestedRef.current) {
+        Alert.alert("Cancel failed", error.message);
+      }
     }
   };
 
   return (
     <View style={styles.container}>
-      <AppHeader
-        title="Upload Media"
-        onOpenMenu={onOpenMenu}
-        rightContent={
-          <TouchableOpacity onPress={() => navigation.navigate("Profile")} activeOpacity={0.85}>
-            <Image source={{ uri: viewerProfile.image }} style={styles.avatar} />
-          </TouchableOpacity>
-        }
-      />
-
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <Text style={styles.heading}>Backup to Family Hub</Text>
+        <View style={styles.uploadTopBar}>
+          <TouchableOpacity style={styles.closeButton} onPress={() => navigation.goBack()} activeOpacity={0.82}>
+            <Ionicons name="close" size={22} color={ui.purple} />
+          </TouchableOpacity>
+          <View style={styles.uploadTitleWrap}>
+            <Text style={styles.heading}>Upload</Text>
+            <Text style={styles.subtitle}>
+              Add photos, videos, and files to your family hub
+            </Text>
+          </View>
+          <View style={styles.closeButton} />
+        </View>
         <Text style={styles.subtitle}>
           Upload images, videos, or files directly to your local backend.
         </Text>
@@ -330,7 +438,7 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
                 style={[styles.chip, active && styles.chipActive]}
                 onPress={() => {
                   setCategory(item.id);
-                  setSelectedFile(null);
+                  setSelectedFiles([]);
                 }}
               >
                 <Ionicons
@@ -432,6 +540,20 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
               </View>
             )}
             <Text style={styles.fileName}>{selectedFile.name}</Text>
+            {selectedFileCount > 1 ? (
+              <Text style={styles.fileCountText}>
+                {selectedFileCount} items selected
+              </Text>
+            ) : null}
+            {selectedFile.size ? (
+              <Text style={styles.fileSizeText}>{formatBytes(selectedFile.size)}</Text>
+            ) : null}
+            {selectedFileUsesChunkedUpload ? (
+              <View style={styles.largeVideoPill}>
+                <Ionicons name="flash-outline" size={13} color={ui.purple} />
+                <Text style={styles.largeVideoText}>Large video - smooth chunked upload</Text>
+              </View>
+            ) : null}
             <Pressable
               style={styles.changeFileButton}
               onPress={() => handlePickFile(category)}
@@ -441,7 +563,7 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
                 <ActivityIndicator color="#2563EB" />
               ) : (
                 <Text style={styles.changeFileButtonText}>
-                  Choose another {category}
+                  Choose more {category === "file" ? "files" : `${category}s`}
                 </Text>
               )}
             </Pressable>
@@ -450,6 +572,7 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
           <Pressable
             style={({ pressed }) => [
               styles.filePicker,
+              softShadow,
               pressed && styles.filePickerPressed,
               isPickingFile && styles.filePickerBusy,
             ]}
@@ -464,15 +587,65 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
               )}
             </View>
             <Text style={styles.filePickerTitle}>
-              {isPickingFile ? "Opening picker..." : `Choose a ${category}`}
+              {isPickingFile ? "Opening picker..." : "Tap anywhere to upload"}
             </Text>
             <Text style={styles.filePickerSubtitle}>
-              {category === "file"
-                ? "Tap here to choose any file from your device."
-                : "Tap here to select from your device library."}
+              Photos, videos, and files
             </Text>
+            <View style={styles.divider} />
+            <View style={styles.browseButton}>
+              <Ionicons name="folder-outline" size={16} color={ui.purple} />
+              <Text style={styles.browseText}>Browse Files</Text>
+            </View>
           </Pressable>
         )}
+
+        {uploadInProgress ? (
+          <View style={[styles.progressCard, softShadow]}>
+            <View style={styles.progressTopRow}>
+              <Text style={styles.progressTitle}>
+                {activeUploadMode === "chunked" ? "Uploading large video" : "Uploading"}
+              </Text>
+              <Text style={styles.progressPercent}>
+                {Math.round(uploadProgress * 100)}%
+              </Text>
+            </View>
+            <View style={styles.progressTrack}>
+              <View
+                style={[
+                  styles.progressFill,
+                  { width: `${Math.max(4, Math.round(uploadProgress * 100))}%` },
+                ]}
+              />
+            </View>
+            <Text style={styles.progressHint}>
+              {activeUploadTotal > 1
+                ? `Item ${activeUploadIndex} of ${activeUploadTotal}${activeUploadFileName ? ` - ${activeUploadFileName}` : ""}`
+                : activeUploadMode === "chunked"
+                ? "Sending one chunk at a time to keep the app responsive."
+                : "Keeping your upload steady."}
+            </Text>
+            {canShowCancelUpload ? (
+              <TouchableOpacity
+                style={[
+                  styles.cancelUploadButton,
+                  isCancellingUpload && styles.uploadButtonDisabled,
+                ]}
+                onPress={handleCancelUpload}
+                disabled={isCancellingUpload}
+              >
+                {isCancellingUpload ? (
+                  <ActivityIndicator color="#DC2626" />
+                ) : (
+                  <>
+                    <Ionicons name="close-circle-outline" size={18} color="#DC2626" />
+                    <Text style={styles.cancelUploadButtonText}>Cancel Upload</Text>
+                  </>
+                )}
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
 
         <TouchableOpacity
           style={[
@@ -490,31 +663,14 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
               {isViewOnly
                 ? "View Only"
                 : selectedFile
-                ? uploadActionTextByCategory[category] || "Upload Now"
+                ? selectedFileCount > 1
+                  ? `Upload ${selectedFileCount} Items`
+                  : uploadActionTextByCategory[category] || "Upload Now"
                 : "Choose Media First"}
             </Text>
           )}
         </TouchableOpacity>
 
-        {activeUploadId && uploadInProgress ? (
-          <TouchableOpacity
-            style={[
-              styles.cancelUploadButton,
-              isCancellingUpload && styles.uploadButtonDisabled,
-            ]}
-            onPress={handleCancelUpload}
-            disabled={isCancellingUpload}
-          >
-            {isCancellingUpload ? (
-              <ActivityIndicator color="#DC2626" />
-            ) : (
-              <>
-                <Ionicons name="close-circle-outline" size={18} color="#DC2626" />
-                <Text style={styles.cancelUploadButtonText}>Cancel Upload</Text>
-              </>
-            )}
-          </TouchableOpacity>
-        ) : null}
       </ScrollView>
     </View>
   );
@@ -523,11 +679,27 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5F6FA",
+    backgroundColor: ui.bg,
   },
   content: {
-    padding: SCREEN_HORIZONTAL_PADDING,
+    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
+    paddingTop: 38,
     paddingBottom: 120,
+  },
+  uploadTopBar: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    marginBottom: 20,
+  },
+  closeButton: {
+    width: 34,
+    height: 34,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  uploadTitleWrap: {
+    flex: 1,
+    alignItems: "center",
   },
   avatar: {
     width: 34,
@@ -535,14 +707,17 @@ const styles = StyleSheet.create({
     borderRadius: 17,
   },
   heading: {
-    fontSize: 22,
-    fontWeight: "700",
-    color: "#111827",
+    fontSize: 15,
+    fontWeight: "900",
+    color: ui.ink,
   },
   subtitle: {
-    marginTop: 6,
-    color: "#6B7280",
-    lineHeight: 20,
+    marginTop: 7,
+    color: ui.muted,
+    lineHeight: 16,
+    fontSize: 10,
+    fontWeight: "700",
+    textAlign: "center",
   },
   sectionLabel: {
     marginTop: 24,
@@ -550,7 +725,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: "700",
     textTransform: "uppercase",
-    letterSpacing: 0.8,
+    letterSpacing: 0,
     color: "#6B7280",
   },
   chipRow: {
@@ -564,7 +739,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#E0ECFF",
     paddingHorizontal: 14,
     paddingVertical: 10,
-    borderRadius: 999,
+    borderRadius: 9,
   },
   chipActive: {
     backgroundColor: "#2563EB",
@@ -618,11 +793,11 @@ const styles = StyleSheet.create({
   filePicker: {
     marginTop: 24,
     backgroundColor: "#fff",
-    borderRadius: 20,
+    borderRadius: 8,
     borderWidth: 1,
     borderStyle: "dashed",
-    borderColor: "#93C5FD",
-    minHeight: 260,
+    borderColor: "#BBAEFF",
+    minHeight: 250,
     padding: 20,
     alignItems: "center",
     justifyContent: "center",
@@ -639,7 +814,7 @@ const styles = StyleSheet.create({
     width: 68,
     height: 68,
     borderRadius: 18,
-    backgroundColor: "#DBEAFE",
+    backgroundColor: "#FFFFFF",
     alignItems: "center",
     justifyContent: "center",
     marginBottom: 16,
@@ -647,12 +822,36 @@ const styles = StyleSheet.create({
   filePickerTitle: {
     fontSize: 18,
     fontWeight: "700",
-    color: "#111827",
+    color: ui.ink,
+    fontSize: 13,
   },
   filePickerSubtitle: {
     marginTop: 8,
     textAlign: "center",
-    color: "#6B7280",
+    color: ui.muted,
+    fontSize: 10,
+    fontWeight: "700",
+  },
+  divider: {
+    height: 1,
+    alignSelf: "stretch",
+    backgroundColor: "#ECE9F7",
+    marginVertical: 18,
+  },
+  browseButton: {
+    minHeight: 38,
+    borderRadius: 8,
+    paddingHorizontal: 18,
+    backgroundColor: ui.purpleSoft,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+  },
+  browseText: {
+    color: ui.purple,
+    fontWeight: "900",
+    fontSize: 12,
   },
   previewImage: {
     width: "100%",
@@ -674,6 +873,35 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     textAlign: "center",
   },
+  fileSizeText: {
+    marginTop: 4,
+    color: ui.muted,
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  fileCountText: {
+    marginTop: 6,
+    color: ui.purple,
+    fontSize: 11,
+    fontWeight: "900",
+    textAlign: "center",
+  },
+  largeVideoPill: {
+    marginTop: 10,
+    minHeight: 30,
+    borderRadius: 8,
+    paddingHorizontal: 12,
+    backgroundColor: ui.purpleSoft,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  largeVideoText: {
+    color: ui.purple,
+    fontSize: 11,
+    fontWeight: "800",
+  },
   changeFileButton: {
     marginTop: 14,
     paddingHorizontal: 14,
@@ -685,10 +913,52 @@ const styles = StyleSheet.create({
     color: "#2563EB",
     fontWeight: "700",
   },
+  progressCard: {
+    marginTop: 18,
+    borderRadius: 8,
+    padding: 14,
+    backgroundColor: "#FFFFFF",
+    borderWidth: 1,
+    borderColor: "#ECE9F7",
+  },
+  progressTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 10,
+  },
+  progressTitle: {
+    color: ui.ink,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  progressPercent: {
+    color: ui.purple,
+    fontSize: 12,
+    fontWeight: "900",
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 6,
+    overflow: "hidden",
+    backgroundColor: "#ECE9F7",
+  },
+  progressFill: {
+    height: "100%",
+    borderRadius: 6,
+    backgroundColor: ui.purple,
+  },
+  progressHint: {
+    marginTop: 8,
+    color: ui.muted,
+    fontSize: 10,
+    fontWeight: "700",
+    lineHeight: 14,
+  },
   uploadButton: {
     marginTop: 20,
-    backgroundColor: "#2563EB",
-    borderRadius: 16,
+    backgroundColor: ui.purple,
+    borderRadius: 8,
     paddingVertical: 16,
     alignItems: "center",
   },

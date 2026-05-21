@@ -111,7 +111,18 @@ export default function ProfileScreen({ navigation, onOpenMenu }) {
             theme={theme}
             onPress={() => navigation.navigate("Appearance")}
           />
-          <Item icon="cloud-upload" title="Storage & Backup" subtitle="2.4 GB of 10 GB used" theme={theme} />
+          <Item
+            icon="cloud-upload"
+            title="Storage & Backup"
+            subtitle="2.4 GB of 10 GB used"
+            theme={theme}
+            onPress={() =>
+              navigation.navigate("BackupSettings", {
+                userId: viewerProfile?.id,
+                profileName: viewerProfile?.name,
+              })
+            }
+          />
           <Item icon="language" title="Language" subtitle="English (US)" theme={theme} />
         </Section>
 

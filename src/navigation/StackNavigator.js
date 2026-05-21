@@ -1,12 +1,11 @@
 import React from "react";
-import { ActivityIndicator, Easing, StyleSheet, View } from "react-native";
+import { ActivityIndicator, StyleSheet, View } from "react-native";
 import {
   CardStyleInterpolators,
   createStackNavigator,
 } from "@react-navigation/stack";
 
 import SplashScreen from "../screens/auth/SplashScreen";
-import LoginScreen from "../screens/auth/LoginScreen";
 import WelcomeScreen from "../screens/auth/WelcomeScreen";
 import AuthProfileScreen from "../screens/auth/ProfileScreen";
 import AddFamilyMember from "../screens/auth/AddFamilyMember";
@@ -23,6 +22,8 @@ import ProfileScreen from "../screens/profile/ProfileScreen";
 import EditProfileScreen from "../screens/profile/EditProfileScreen";
 import NotificationsScreen from "../screens/profile/NotificationsScreen";
 import AppearanceScreen from "../screens/profile/AppearanceScreen";
+import BackupDashboardScreen from "../screens/backup/BackupDashboardScreen";
+import BackupSettingsScreen from "../screens/backup/BackupSettingsScreen";
 import BottomNav from "../components/navigation/BottomNav";
 import MenuDrawer from "../components/navigation/MenuDrawer";
 import { useProfile } from "../context/ProfileContext";
@@ -135,7 +136,7 @@ const ProfileWithBottomNav = withBottomNav(ProfileScreen);
 const EditProfileWithBottomNav = withBottomNav(EditProfileScreen);
 const NotificationsWithBottomNav = withBottomNav(NotificationsScreen);
 const AppearanceWithBottomNav = withBottomNav(AppearanceScreen);
-const GuardedWelcomeScreen = withRouteGuard(WelcomeScreen, { guestOnly: true });
+const BackupDashboardWithBottomNav = withBottomNav(BackupDashboardScreen);
 const GuardedFirstLoginSetupScreen = withRouteGuard(FirstLoginSetupScreen, {
   firstLoginOnly: true,
 });
@@ -153,6 +154,8 @@ const GuardedProfile = withRouteGuard(ProfileWithBottomNav, { requireAuth: true 
 const GuardedEditProfile = withRouteGuard(EditProfileWithBottomNav, { requireAuth: true });
 const GuardedNotifications = withRouteGuard(NotificationsWithBottomNav, { requireAuth: true });
 const GuardedAppearance = withRouteGuard(AppearanceWithBottomNav, { requireAuth: true });
+const GuardedBackupDashboard = withRouteGuard(BackupDashboardWithBottomNav, { requireAuth: true });
+const GuardedBackupSettings = withRouteGuard(BackupSettingsScreen, { requireAuth: true });
 
 const noSwipeBackScreens = [
   "Gallery",
@@ -175,77 +178,54 @@ const bottomNavScreens = [
   "Upload",
   "Profile",
   "Appearance",
+  "BackupDashboard",
 ];
 
-const openTransition = {
+const authRoutes = ["Splash", "Welcome", "AuthProfile"];
+const verticalRoutes = ["FirstLoginSetup", "AddFamilyMember", "VerifyIdentity", "VerifyOTP"];
+
+const fastOpenTransition = {
   animation: "timing",
   config: {
-    duration: 220,
-    easing: Easing.out(Easing.quad),
+    duration: 170,
   },
 };
 
-const closeTransition = {
+const fastCloseTransition = {
   animation: "timing",
   config: {
-    duration: 180,
-    easing: Easing.in(Easing.quad),
+    duration: 140,
   },
-};
-
-const quickFadeInterpolator = ({ current }) => {
-  const opacity = current.progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 1],
-  });
-
-  return {
-    cardStyle: {
-      opacity,
-    },
-  };
-};
-
-const smoothSlideInterpolator = ({ current, layouts }) => {
-  const opacity = current.progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0.96, 1],
-  });
-
-  const translateX = current.progress.interpolate({
-    inputRange: [0, 1],
-    outputRange: [layouts.screen.width * 0.08, 0],
-  });
-
-  return {
-    cardStyle: {
-      opacity,
-      transform: [{ translateX }],
-    },
-  };
 };
 
 export default function StackNavigator() {
   return (
     <Stack.Navigator
-      initialRouteName="AuthProfile"
+      initialRouteName="Splash"
       screenOptions={({ route }) => {
-        const isAuthScreen = ["Splash", "Login", "Welcome", "AuthProfile"].includes(route.name);
+        const isAuthScreen = authRoutes.includes(route.name);
         const isBottomNavScreen = bottomNavScreens.includes(route.name);
+        const isVerticalScreen = verticalRoutes.includes(route.name);
+
+        let cardStyleInterpolator = CardStyleInterpolators.forHorizontalIOS;
+
+        if (isAuthScreen) {
+          cardStyleInterpolator = CardStyleInterpolators.forFadeFromCenter;
+        } else if (isBottomNavScreen) {
+          cardStyleInterpolator = CardStyleInterpolators.forFadeFromCenter;
+        } else if (isVerticalScreen) {
+          cardStyleInterpolator = CardStyleInterpolators.forVerticalIOS;
+        }
 
         return {
           headerShown: false,
           gestureEnabled: !noSwipeBackScreens.includes(route.name),
           animationEnabled: true,
           transitionSpec: {
-            open: openTransition,
-            close: closeTransition,
+            open: fastOpenTransition,
+            close: fastCloseTransition,
           },
-          cardStyleInterpolator: isAuthScreen
-            ? CardStyleInterpolators.forFadeFromBottomAndroid
-            : isBottomNavScreen
-              ? quickFadeInterpolator
-              : smoothSlideInterpolator,
+          cardStyleInterpolator,
         };
       }}
     >
@@ -254,12 +234,7 @@ export default function StackNavigator() {
         component={SplashScreen}
         options={{ gestureEnabled: false }}
       />
-      <Stack.Screen
-        name="Login"
-        component={LoginScreen}
-        options={{ gestureEnabled: false }}
-      />
-      <Stack.Screen name="Welcome" component={GuardedWelcomeScreen} />
+      <Stack.Screen name="Welcome" component={WelcomeScreen} />
       <Stack.Screen name="AuthProfile" component={AuthProfileScreen} />
       <Stack.Screen name="FirstLoginSetup" component={GuardedFirstLoginSetupScreen} />
       <Stack.Screen name="AddFamilyMember" component={GuardedAddFamilyMember} />
@@ -275,6 +250,8 @@ export default function StackNavigator() {
       <Stack.Screen name="EditProfile" component={GuardedEditProfile} />
       <Stack.Screen name="Notifications" component={GuardedNotifications} />
       <Stack.Screen name="Appearance" component={GuardedAppearance} />
+      <Stack.Screen name="BackupDashboard" component={GuardedBackupDashboard} />
+      <Stack.Screen name="BackupSettings" component={GuardedBackupSettings} />
     </Stack.Navigator>
   );
 }

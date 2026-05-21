@@ -5,6 +5,7 @@ import { useNavigation, useRoute } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
+import { softShadow } from "../media/MediaDesign";
 
 const BottomNav = ({ activeTab }) => {
   const navigation = useNavigation();
@@ -14,10 +15,11 @@ const BottomNav = ({ activeTab }) => {
   const { canManageMedia } = useProfile();
   const focusedTab = activeTab || route.name;
   const tabs = [
-    { id: "Gallery", icon: "albums-outline", activeIcon: "albums", label: "Gallery" },
+    { id: "Gallery", icon: "images-outline", activeIcon: "images", label: "Gallery" },
     { id: "Images", icon: "image-outline", activeIcon: "image", label: "Images" },
     { id: "Videos", icon: "videocam-outline", activeIcon: "videocam", label: "Videos" },
-    { id: "Files", icon: "document-text-outline", activeIcon: "document-text", label: "Files" },
+    { id: "Files", icon: "folder-outline", activeIcon: "folder", label: "Files" },
+    { id: "BackupDashboard", icon: "cloud-upload-outline", activeIcon: "cloud-upload", label: "Back up" },
   ];
 
   const [uploadOptionsVisible, setUploadOptionsVisible] = useState(false);
@@ -39,59 +41,14 @@ const BottomNav = ({ activeTab }) => {
       <View
         style={[
           styles.bottomNav,
+          softShadow,
           {
             backgroundColor: theme.tabBar,
-            borderTopColor: theme.border,
-            paddingBottom: Math.max(insets.bottom, 10),
+            paddingBottom: Math.max(insets.bottom, 8),
           },
         ]}
       >
-        {tabs.slice(0, 2).map((tab) => {
-          const isActive = focusedTab === tab.id;
-          return (
-            <TouchableOpacity
-              key={tab.id}
-              style={[styles.navItem, isActive && { backgroundColor: theme.iconBg }]}
-              onPress={() => {
-                if (!isActive) {
-                  navigation.navigate(tab.id);
-                }
-              }}
-              activeOpacity={0.82}
-            >
-              <Ionicons
-                name={isActive ? tab.activeIcon : tab.icon}
-                size={21}
-                color={isActive ? theme.primary : theme.subText}
-              />
-              <Text
-                style={[
-                  styles.navText,
-                  { color: isActive ? theme.primary : theme.subText },
-                ]}
-              >
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-
-        <View style={styles.centerButtonWrapper}>
-          <Pressable
-            style={({ pressed }) => [
-              styles.centerButton,
-              { backgroundColor: theme.primary },
-              !canManageMedia && styles.navItemDisabled,
-              pressed && styles.centerButtonPressed,
-            ]}
-            onPress={openUploadOptions}
-            hitSlop={10}
-          >
-            <Ionicons name="add" size={30} color="#fff" />
-          </Pressable>
-        </View>
-
-        {tabs.slice(2).map((tab) => {
+        {tabs.map((tab) => {
           const isActive = focusedTab === tab.id;
           return (
             <TouchableOpacity
@@ -122,6 +79,22 @@ const BottomNav = ({ activeTab }) => {
         })}
       </View>
 
+      <View style={[styles.centerButtonWrapper, softShadow]}>
+        <Pressable
+          style={({ pressed }) => [
+            styles.centerButton,
+            { backgroundColor: theme.primary },
+            !canManageMedia && styles.navItemDisabled,
+            pressed && styles.centerButtonPressed,
+          ]}
+          onPress={openUploadOptions}
+          hitSlop={10}
+        >
+          <Ionicons name="add" size={26} color="#fff" />
+        </Pressable>
+        <Text style={[styles.uploadLabel, { color: theme.primary }]}>Upload</Text>
+      </View>
+
       <Modal visible={uploadOptionsVisible} transparent animationType="fade" onRequestClose={closeUploadOptions}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={closeUploadOptions} />
         <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
@@ -149,37 +122,34 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-around",
     alignItems: "center",
-    paddingHorizontal: 8,
-    paddingTop: 8,
+    marginHorizontal: 16,
+    marginBottom: 8,
+    paddingHorizontal: 5,
+    paddingTop: 7,
     backgroundColor: "#fff",
-    borderTopWidth: 1,
-    borderTopColor: "#E5E7EB",
+    borderRadius: 14,
   },
   navItem: {
     flex: 1,
-    minHeight: 48,
+    minHeight: 50,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 12,
+    borderRadius: 10,
     gap: 2,
   },
   centerButtonWrapper: {
-    width: 72,
-    height: 72,
-    borderRadius: 36,
-    marginTop: -24,
+    position: "absolute",
+    right: 22,
+    bottom: 72,
+    width: 54,
+    height: 66,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.16,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 6,
   },
   centerButton: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -226,8 +196,13 @@ const styles = StyleSheet.create({
     opacity: 0.55,
   },
   navText: {
-    fontSize: 10,
-    fontWeight: "600",
+    fontSize: 9,
+    fontWeight: "700",
+  },
+  uploadLabel: {
+    marginTop: 2,
+    fontSize: 8,
+    fontWeight: "800",
   },
 });
 

@@ -15,6 +15,14 @@ import { Ionicons } from "@expo/vector-icons";
 import ThemedAvatar from "../../components/common/ThemedAvatar";
 import AppHeader from "../../components/navigation/AppHeader";
 import ImageViewer from "../../components/media/ImageViewer";
+import {
+  FadeInView,
+  MediaBadge,
+  SearchFilterBar,
+  getFriendlyTitle,
+  softShadow,
+  ui,
+} from "../../components/media/MediaDesign";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { resolveMediaUri } from "../../services/api";
@@ -169,7 +177,7 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
       groupedImages.map((section) => {
         const rows = [];
 
-        const itemsPerRow = isGridView ? 2 : 1;
+        const itemsPerRow = isGridView ? 4 : 1;
 
         for (let index = 0; index < section.data.length; index += itemsPerRow) {
           const rowItems = section.data.slice(index, index + itemsPerRow);
@@ -249,108 +257,31 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
         windowSize={7}
         ListHeaderComponent={
           <>
-            <View style={[styles.heroCard, { backgroundColor: theme.surface, borderColor: theme.border }]}>
-              <View style={styles.heroTopRow}>
-                <View style={styles.heroCopy}>
-                  <Text style={[styles.eyebrow, { color: theme.primary }]}>Photo Library</Text>
-                  <Text style={[styles.heroTitle, { color: theme.text }]}>
-                    {selectedChild?.name || viewerProfile.name}
-                  </Text>
-                  <Text style={[styles.heroSubtitle, { color: theme.subText }]}>
-                    {images.length} photo{images.length === 1 ? "" : "s"} across{" "}
-                    {groupedImages.length} day{groupedImages.length === 1 ? "" : "s"}
-                  </Text>
-                </View>
-
-                <View style={styles.heroPreviewWrap}>
-                  {featuredImages.length ? (
-                    featuredImages.map((item, index) => (
-                      <Image
-                        key={getImageTileKey(item, index, "featured")}
-                        source={{ uri: getImageUri(item) }}
-                        style={[
-                          styles.heroPreview,
-                          index === 0 && styles.heroPreviewMain,
-                          index === 1 && styles.heroPreviewSecond,
-                          index === 2 && styles.heroPreviewThird,
-                        ]}
-                      />
-                    ))
-                  ) : (
-                    <View style={[styles.heroEmptyPreview, { backgroundColor: theme.iconBg }]}>
-                      <Ionicons name="images" size={26} color={theme.primary} />
-                    </View>
-                  )}
-                </View>
-              </View>
-
-              <View style={styles.heroBottomRow}>
-                <View style={[styles.statPill, { backgroundColor: theme.iconBg }]}>
-                  <Ionicons name="image" size={16} color={theme.primary} />
-                  <Text style={[styles.statPillText, { color: theme.primary }]}>
-                    {images.length} Photos
-                  </Text>
-                </View>
-                <View style={[styles.statPill, { backgroundColor: theme.iconBg }]}>
-                  <Ionicons name="calendar" size={16} color={theme.primary} />
-                  <Text style={[styles.statPillText, { color: theme.primary }]}>
-                    {latestImage ? formatImageDate(latestImage.created_at || latestImage.createdAt) : "No Photos"}
-                  </Text>
-                </View>
-              </View>
-            </View>
-
-            <View style={styles.toolbarRow}>
-              <View style={[styles.searchShell, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                <Ionicons name="search" size={18} color={theme.subText} />
-                <TextInput
-                  placeholder="Search images..."
-                  placeholderTextColor={theme.subText}
-                  style={[styles.searchInput, { color: theme.text }]}
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                />
-                {searchQuery ? (
-                  <TouchableOpacity onPress={() => setSearchQuery("")} activeOpacity={0.8}>
-                    <Ionicons name="close-circle" size={18} color={theme.subText} />
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-
-              <TouchableOpacity
-                style={[
-                  styles.filterButton,
-                  {
-                    backgroundColor: hasActiveFilters ? theme.primary : theme.card,
-                    borderColor: theme.border,
-                  },
-                ]}
-                onPress={() => setFilterVisible(true)}
-                activeOpacity={0.85}
-              >
-                <Ionicons
-                  name="options-outline"
-                  size={22}
-                  color={hasActiveFilters ? theme.buttonText : theme.text}
-                />
-              </TouchableOpacity>
+            <SearchFilterBar
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onClear={() => setSearchQuery("")}
+              onFilterPress={() => setFilterVisible(true)}
+              placeholder="Search images..."
+              active={hasActiveFilters}
+            />
+            <View style={styles.librarySummary}>
+              <Text style={[styles.summaryMonth, { color: theme.text }]}>April 2025</Text>
+              <Text style={[styles.summaryCount, { color: theme.subText }]}>
+                {images.length} Photos
+              </Text>
             </View>
           </>
         }
-        renderItem={({ item: section }) => (
-          <View style={styles.section}>
+        renderItem={({ item: section, index }) => (
+          <FadeInView style={styles.section} delay={Math.min(index * 30, 150)}>
             <View style={styles.sectionHeader}>
               <View>
                 <Text style={[styles.sectionTitle, { color: theme.text }]}>{section.title}</Text>
-                <Text style={[styles.sectionSubTitle, { color: theme.subText }]}>
-                  Memories from this day
-                </Text>
               </View>
-              <View style={[styles.sectionCount, { backgroundColor: theme.iconBg }]}>
-                <Text style={[styles.sectionMeta, { color: theme.primary }]}>
-                  {section.data.length}
-                </Text>
-              </View>
+              <Text style={[styles.sectionMeta, { color: theme.subText }]}>
+                {section.data.length} Photos
+              </Text>
             </View>
 
             {section.rows.map((row) => (
@@ -363,22 +294,14 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
                     style={[
                       isGridView ? styles.pairTile : styles.listTile,
                       { backgroundColor: theme.card },
+                      isGridView && softShadow,
                     ]}
                   >
                     {isGridView ? (
                       <>
                         <Image source={{ uri: getImageUri(item) }} style={styles.tileImage} />
                         <View style={styles.tileShade} />
-                        <View style={styles.tileTopOverlay}>
-                          <View style={styles.tileIconBubble}>
-                            <Ionicons name="image" size={13} color="#fff" />
-                          </View>
-                        </View>
-                        <View style={styles.tileFooter}>
-                          <Text style={styles.tileTitle} numberOfLines={1}>
-                            {item.original_file_name || item.stored_file_name || "Photo"}
-                          </Text>
-                        </View>
+                        <MediaBadge icon="image-outline"></MediaBadge>
                       </>
                     ) : (
                       <View style={styles.listTileContent}>
@@ -396,10 +319,14 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
                   </TouchableOpacity>
                 ))}
 
-                {isGridView && row.items.length === 1 ? <View style={styles.pairTileSpacer} /> : null}
+                {isGridView
+                  ? Array.from({ length: 4 - row.items.length }).map((_, spacerIndex) => (
+                      <View key={`spacer-${row.id}-${spacerIndex}`} style={styles.pairTileSpacer} />
+                    ))
+                  : null}
               </View>
             ))}
-          </View>
+          </FadeInView>
         )}
         ListEmptyComponent={
           <View style={[styles.emptyState, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -517,7 +444,7 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F4F6FB",
+    backgroundColor: ui.bg,
   },
   avatar: {
     width: 38,
@@ -525,8 +452,23 @@ const styles = StyleSheet.create({
     borderRadius: 19,
   },
   content: {
-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
     paddingBottom: 28,
+  },
+  librarySummary: {
+    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
+    paddingTop: 4,
+    paddingBottom: 12,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  summaryMonth: {
+    fontSize: 13,
+    fontWeight: "900",
+  },
+  summaryCount: {
+    fontSize: 11,
+    fontWeight: "800",
   },
   heroCard: {
     marginTop: 8,
@@ -655,18 +597,19 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   section: {
-    marginBottom: 24,
+    marginBottom: 18,
+    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
   },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 12,
+    marginBottom: 9,
   },
   sectionTitle: {
     color: "#111827",
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 13,
+    fontWeight: "900",
   },
   sectionSubTitle: {
     marginTop: 3,
@@ -690,17 +633,17 @@ const styles = StyleSheet.create({
   pairRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 10,
+    marginBottom: 8,
   },
   pairTile: {
-    width: "48.5%",
+    width: "23.4%",
     aspectRatio: 1,
-    borderRadius: 18,
+    borderRadius: 8,
     overflow: "hidden",
     backgroundColor: "#DCE5F3",
   },
   pairTileSpacer: {
-    width: "48.5%",
+    width: "23.4%",
     aspectRatio: 1,
   },
   listTile: {

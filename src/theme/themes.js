@@ -4,23 +4,23 @@ export const themes = {
     name: "Light",
     isDark: false,
 
-    background: "#F5F6FA",
+    background: "#FBFAFF",
     surface: "#FFFFFF",
     card: "#FFFFFF",
 
-    primary: "#3B82F6",
-    secondary: "#60A5FA",
+    primary: "#4C1DFF",
+    secondary: "#7C5CFF",
 
-    accent: "#DBEAFE",
+    accent: "#EDE7FF",
 
-    text: "#111827",
-    subText: "#6B7280",
+    text: "#101445",
+    subText: "#7377A0",
 
-    border: "#E5E7EB",
+    border: "#ECE9F7",
 
-    iconBg: "#EFF6FF",
+    iconBg: "#F1ECFF",
 
-    button: "#3B82F6",
+    button: "#4C1DFF",
     buttonText: "#FFFFFF",
 
     header: "#FFFFFF",

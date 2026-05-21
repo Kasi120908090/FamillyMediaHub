@@ -13,6 +13,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import { SafeAreaView, useSafeAreaInsets } from "react-native-safe-area-context";
 import logo from "../../../assets/logo.png";
+import iconBg from "../../../assets/iconbg.png";
 
 export function BrandHeader({ rightSlot }) {
   return (
@@ -177,12 +178,16 @@ export function InfoBanner({ icon = "shield-checkmark-outline", text, style }) {
   );
 }
 
-export function SectionTitle({ title, subtitle, centered = false }) {
+export function SectionTitle({ title, subtitle, centered = false, titleStyle, subtitleStyle }) {
   return (
     <View style={styles.sectionTitleWrap}>
-      <Text style={[styles.sectionTitle, centered ? styles.textCentered : null]}>{title}</Text>
+      <Text style={[styles.sectionTitle, centered ? styles.textCentered : null, titleStyle]}>
+        {title}
+      </Text>
       {subtitle ? (
-        <Text style={[styles.sectionSubtitle, centered ? styles.textCentered : null]}>{subtitle}</Text>
+        <Text style={[styles.sectionSubtitle, centered ? styles.textCentered : null, subtitleStyle]}>
+          {subtitle}
+        </Text>
       ) : null}
     </View>
   );
@@ -191,19 +196,12 @@ export function SectionTitle({ title, subtitle, centered = false }) {
 export function FamilyHeroIllustration({ locked = false }) {
   return (
     <View style={styles.heroIllustration}>
-      <View style={styles.heroRing} />
-      <View style={styles.heroGlow} />
-      <View style={styles.heroPersonMain} />
-      <View style={styles.heroPersonSmallLeft} />
-      <View style={styles.heroPersonSmallRight} />
+      <Image source={iconBg} style={styles.heroImage} resizeMode="contain" />
       {locked ? (
         <View style={styles.heroLockBadge}>
           <Ionicons name="lock-closed" size={13} color="#FFFFFF" />
         </View>
       ) : null}
-      <View style={styles.sparkleOne} />
-      <View style={styles.sparkleTwo} />
-      <View style={styles.sparkleThree} />
     </View>
   );
 }
@@ -262,7 +260,7 @@ const styles = StyleSheet.create({
   },
   header: {
     paddingHorizontal: 22,
-    paddingTop: 8,
+    paddingTop: 22,
     paddingBottom: 18,
     flexDirection: "row",
     alignItems: "center",
@@ -274,9 +272,9 @@ const styles = StyleSheet.create({
     flexShrink: 1,
   },
   brandMark: {
-    width: 30,
-    height: 30,
-    borderRadius: 10,
+    width: 42,
+    height: 42,
+    borderRadius: 12,
     backgroundColor: "#4E1FDE",
     justifyContent: "center",
     alignItems: "center",
@@ -288,12 +286,12 @@ const styles = StyleSheet.create({
     elevation: 5,
   },
   brandLogo: {
-    width: 20,
-    height: 20,
+    width: 30,
+    height: 30,
   },
   brandTitle: {
-    fontSize: 11,
-    lineHeight: 14,
+    fontSize: 20,
+    lineHeight: 24,
     fontWeight: "800",
     color: "#34208C",
   },
@@ -457,54 +455,14 @@ const styles = StyleSheet.create({
     lineHeight: 16,
   },
   heroIllustration: {
-    width: 118,
-    height: 96,
+    width: 200,
+    height: 326,
     alignItems: "center",
     justifyContent: "center",
   },
-  heroRing: {
-    position: "absolute",
-    width: 96,
-    height: 96,
-    borderRadius: 48,
-    borderWidth: 10,
-    borderColor: "rgba(176, 149, 255, 0.18)",
-  },
-  heroGlow: {
-    position: "absolute",
-    width: 74,
-    height: 74,
-    borderRadius: 37,
-    backgroundColor: "rgba(130, 82, 255, 0.12)",
-  },
-  heroPersonMain: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "#5A1FE2",
-    shadowColor: "#5A23E5",
-    shadowOpacity: 0.28,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 7 },
-    elevation: 6,
-  },
-  heroPersonSmallLeft: {
-    position: "absolute",
-    left: 18,
-    bottom: 18,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: "rgba(142, 107, 255, 0.48)",
-  },
-  heroPersonSmallRight: {
-    position: "absolute",
-    right: 18,
-    bottom: 20,
-    width: 20,
-    height: 20,
-    borderRadius: 10,
-    backgroundColor: "rgba(194, 171, 255, 0.72)",
+  heroImage: {
+    width: "100%",
+    height: "100%",
   },
   heroLockBadge: {
     position: "absolute",
@@ -519,36 +477,9 @@ const styles = StyleSheet.create({
     borderWidth: 2,
     borderColor: "#FFFFFF",
   },
-  sparkleOne: {
-    position: "absolute",
-    left: 22,
-    top: 14,
-    width: 5,
-    height: 5,
-    borderRadius: 3,
-    backgroundColor: "#8C67FF",
-  },
-  sparkleTwo: {
-    position: "absolute",
-    right: 20,
-    top: 22,
-    width: 4,
-    height: 4,
-    borderRadius: 2,
-    backgroundColor: "#D7C8FF",
-  },
-  sparkleThree: {
-    position: "absolute",
-    right: 34,
-    top: 8,
-    width: 2,
-    height: 2,
-    borderRadius: 1,
-    backgroundColor: "#7A4EFF",
-  },
   footerWaves: {
     height: 86,
-    marginTop: 12,
+    marginTop: "auto",
     justifyContent: "flex-end",
     overflow: "hidden",
   },

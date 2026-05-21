@@ -18,6 +18,16 @@ import AppHeader from "../../components/navigation/AppHeader";
 import VideoPlayer from "../../components/media/VideoPlayer";
 import VideoThumbnail from "../../components/media/VideoThumbnail";
 import ZoomableMedia from "../../components/media/ZoomableMedia";
+import {
+  FadeInView,
+  MediaBadge,
+  PlayButton,
+  SearchFilterBar,
+  formatDuration,
+  getFriendlyTitle,
+  softShadow,
+  ui,
+} from "../../components/media/MediaDesign";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
@@ -108,7 +118,7 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
   const [datePickerTarget, setDatePickerTarget] = useState(null);
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
-  const [isGridView, setIsGridView] = useState(false);
+  const [isGridView, setIsGridView] = useState(true);
   const [isDateReversed, setIsDateReversed] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [currentVideo, setCurrentVideo] = useState(null);
@@ -264,12 +274,11 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
         >
           <View style={styles.gridPreviewWrap}>
             <VideoThumbnail item={item} style={styles.gridPreview} />
-            <View style={styles.playBadge}>
-              <Ionicons name="play" size={14} color="#fff" />
-            </View>
+          <PlayButton small />
+          <MediaBadge>{formatDuration(item.duration)}</MediaBadge>
           </View>
           <Text style={[styles.gridTitle, { color: theme.text }]} numberOfLines={1}>
-            {title}
+            {getFriendlyTitle(item, "Video")}
           </Text>
           <Text style={[styles.videoMeta, { color: theme.subText }]} numberOfLines={1}>
             {sectionTitle}
@@ -281,19 +290,18 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
     return (
       <TouchableOpacity
         key={getVideoItemKey(item, index)}
-        style={[styles.videoCard, { backgroundColor: theme.card }]}
+        style={[styles.videoCard, softShadow, { backgroundColor: theme.card }]}
         onPress={() => openVideo(item)}
         activeOpacity={0.88}
       >
         <View style={styles.videoPreviewWrap}>
           <VideoThumbnail item={item} style={styles.videoPreview} />
-          <View style={styles.playBadge}>
-            <Ionicons name="play" size={16} color="#fff" />
-          </View>
+          <PlayButton />
+          <MediaBadge>{formatDuration(item.duration)}</MediaBadge>
         </View>
         <View style={styles.videoText}>
           <Text style={[styles.videoTitle, { color: theme.text }]} numberOfLines={1}>
-            {title}
+            {getFriendlyTitle(item, "Video")}
           </Text>
           <Text style={[styles.videoMeta, { color: theme.subText }]}>
             {item.content_type || "video"}
@@ -303,8 +311,8 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
     );
   };
 
-  const renderVideoSection = ({ item: section }) => (
-    <View style={styles.section}>
+  const renderVideoSection = ({ item: section, index }) => (
+    <FadeInView style={styles.section} delay={Math.min(index * 30, 150)}>
       <View style={styles.sectionHeader}>
         <View>
           <Text style={[styles.sectionTitle, { color: theme.text }]}>{section.title}</Text>
@@ -326,7 +334,7 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
       ) : (
         section.data.map((item, index) => renderVideoCard(item, index, section.title))
       )}
-    </View>
+    </FadeInView>
   );
 
   useEffect(() => {
@@ -353,40 +361,14 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
         }
       />
 
-      <View style={styles.searchRow}>
-        <View style={[styles.searchBox, { backgroundColor: theme.card }]}>
-          <Ionicons name="search" size={16} color={theme.subText} />
-          <TextInput
-            placeholder="Search videos..."
-            placeholderTextColor={theme.subText}
-            style={[styles.searchInput, { color: theme.text }]}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery ? (
-            <TouchableOpacity onPress={() => setSearchQuery("")} activeOpacity={0.8}>
-              <Ionicons name="close-circle" size={18} color={theme.subText} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        <TouchableOpacity
-          style={[
-            styles.filterButton,
-            {
-              backgroundColor: hasActiveFilters ? theme.primary : theme.card,
-              borderColor: theme.border,
-            },
-          ]}
-          onPress={() => setFilterVisible(true)}
-          activeOpacity={0.85}
-        >
-          <Ionicons
-            name="options-outline"
-            size={20}
-            color={hasActiveFilters ? theme.buttonText : theme.text}
-          />
-        </TouchableOpacity>
-      </View>
+      <SearchFilterBar
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        onClear={() => setSearchQuery("")}
+        onFilterPress={() => setFilterVisible(true)}
+        placeholder="Search videos..."
+        active={hasActiveFilters}
+      />
 
       <FlatList
         data={groupedVideos}
@@ -582,7 +564,7 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5F6FA",
+    backgroundColor: ui.bg,
   },
   avatar: {
     width: 34,
@@ -619,7 +601,7 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
-    paddingBottom: 20,
+    paddingBottom: 28,
   },
   section: {
     marginBottom: 22,
@@ -631,8 +613,8 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 13,
+    fontWeight: "900",
   },
   sectionSubTitle: {
     marginTop: 3,
@@ -653,28 +635,17 @@ const styles = StyleSheet.create({
   },
   videoCard: {
     backgroundColor: "#fff",
-    borderRadius: 16,
-    padding: 12,
+    borderRadius: 10,
+    padding: 8,
     marginBottom: 12,
   },
   videoPreviewWrap: {
-    borderRadius: 12,
+    borderRadius: 8,
     overflow: "hidden",
   },
   videoPreview: {
     width: "100%",
-    height: 210,
-  },
-  playBadge: {
-    position: "absolute",
-    left: 10,
-    bottom: 10,
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: "rgba(0,0,0,0.52)",
-    alignItems: "center",
-    justifyContent: "center",
+    height: 150,
   },
   videoText: {
     marginTop: 12,
@@ -693,14 +664,15 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
   },
   gridCard: {
-    width: "48.5%",
-    borderRadius: 14,
-    padding: 8,
+    width: "31.5%",
+    borderRadius: 8,
+    padding: 0,
     marginBottom: 10,
+    overflow: "hidden",
   },
   gridPreviewWrap: {
     aspectRatio: 1,
-    borderRadius: 11,
+    borderRadius: 8,
     overflow: "hidden",
     backgroundColor: "#111827",
   },
@@ -709,9 +681,10 @@ const styles = StyleSheet.create({
     height: "100%",
   },
   gridTitle: {
-    marginTop: 8,
-    fontSize: 12,
-    fontWeight: "700",
+    marginTop: 5,
+    paddingHorizontal: 2,
+    fontSize: 10,
+    fontWeight: "800",
   },
   emptyState: {
     backgroundColor: "#fff",

@@ -14,6 +14,15 @@ import { Ionicons } from "@expo/vector-icons";
 import ThemedAvatar from "../../components/common/ThemedAvatar";
 import FileViewer from "../../components/media/FileViewer";
 import AppHeader from "../../components/navigation/AppHeader";
+import {
+  FileChip,
+  SearchFilterBar,
+  getFileTone,
+  getFriendlyTitle,
+  getReadableSize,
+  softShadow,
+  ui,
+} from "../../components/media/MediaDesign";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { resolveMediaUri } from "../../services/api";
@@ -95,7 +104,7 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
   const [datePickerTarget, setDatePickerTarget] = useState(null);
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
-  const [isGridView, setIsGridView] = useState(false);
+  const [isGridView, setIsGridView] = useState(true);
   const [isDateReversed, setIsDateReversed] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
 
@@ -175,18 +184,16 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
     if (isGridView) {
       return (
         <TouchableOpacity
-          style={[styles.fileGridCard, { backgroundColor: theme.card }]}
+          style={[styles.fileGridCard, softShadow, { backgroundColor: theme.card }]}
           onPress={() => setSelectedFile(item)}
           activeOpacity={0.86}
         >
-          <View style={[styles.gridIconBox, { backgroundColor: theme.primary }]}>
-            <Ionicons name="document-text" size={28} color="#fff" />
-          </View>
+          <FileChip compact name={fileName} type={item.content_type} />
           <Text style={[styles.fileName, { color: theme.text }]} numberOfLines={2}>
-            {fileName}
+            {getFriendlyTitle(item, "Document")}
           </Text>
           <Text style={[styles.fileMeta, { color: theme.subText }]} numberOfLines={1}>
-            {formatShortDate(getItemDate(item))}
+            {getReadableSize(item) || formatShortDate(getItemDate(item))}
           </Text>
         </TouchableOpacity>
       );
@@ -194,20 +201,24 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
 
     return (
       <TouchableOpacity
-        style={[styles.fileCard, { backgroundColor: theme.card }]}
+        style={[styles.fileCard, softShadow, { backgroundColor: theme.card }]}
         onPress={() => setSelectedFile(item)}
         activeOpacity={0.86}
       >
         <View style={styles.fileLeft}>
-          <View style={[styles.iconBox, { backgroundColor: theme.primary }]}>
-            <Ionicons name="document-text" size={18} color="#fff" />
+          <View style={[styles.iconBox, { backgroundColor: getFileTone(fileName, item.content_type).bg }]}>
+            <Ionicons
+              name={getFileTone(fileName, item.content_type).icon}
+              size={18}
+              color={getFileTone(fileName, item.content_type).color}
+            />
           </View>
           <View style={styles.fileText}>
             <Text style={[styles.fileName, { color: theme.text }]} numberOfLines={1}>
-              {fileName}
+              {getFriendlyTitle(item, "Document")}
             </Text>
             <Text style={[styles.fileMeta, { color: theme.subText }]}>
-              {item.content_type || "file"} • {formatShortDate(getItemDate(item))}
+              {getReadableSize(item) || item.content_type || "file"} - {formatShortDate(getItemDate(item))}
             </Text>
           </View>
         </View>
@@ -227,46 +238,20 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
         }
       />
 
-      <View style={styles.searchRow}>
-        <View style={[styles.searchBox, { backgroundColor: theme.card }]}>
-          <Ionicons name="search" size={16} color={theme.subText} />
-          <TextInput
-            placeholder="Search files..."
-            placeholderTextColor={theme.subText}
-            style={[styles.input, { color: theme.text }]}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-          {searchQuery ? (
-            <TouchableOpacity onPress={() => setSearchQuery("")} activeOpacity={0.8}>
-              <Ionicons name="close-circle" size={18} color={theme.subText} />
-            </TouchableOpacity>
-          ) : null}
-        </View>
-        <TouchableOpacity
-          style={[
-            styles.filterButton,
-            {
-              backgroundColor: hasActiveFilters ? theme.primary : theme.card,
-              borderColor: theme.border,
-            },
-          ]}
-          onPress={() => setFilterVisible(true)}
-          activeOpacity={0.85}
-        >
-          <Ionicons
-            name="options-outline"
-            size={20}
-            color={hasActiveFilters ? theme.buttonText : theme.text}
-          />
-        </TouchableOpacity>
-      </View>
+      <SearchFilterBar
+        value={searchQuery}
+        onChangeText={setSearchQuery}
+        onClear={() => setSearchQuery("")}
+        onFilterPress={() => setFilterVisible(true)}
+        placeholder="Search files..."
+        active={hasActiveFilters}
+      />
 
       <FlatList
         data={files}
         keyExtractor={getFileItemKey}
         key={isGridView ? "files-grid" : "files-list"}
-        numColumns={isGridView ? 2 : 1}
+        numColumns={isGridView ? 3 : 1}
         columnWrapperStyle={isGridView ? styles.gridRow : null}
         contentContainerStyle={styles.listContent}
         renderItem={renderFileItem}
@@ -385,7 +370,7 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5F6FA",
+    backgroundColor: ui.bg,
   },
   avatar: {
     width: 34,
@@ -422,23 +407,23 @@ const styles = StyleSheet.create({
   },
   listContent: {
     paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
-    paddingBottom: 20,
+    paddingBottom: 28,
   },
   gridRow: {
     justifyContent: "space-between",
   },
   fileCard: {
     backgroundColor: "#fff",
-    borderRadius: 14,
+    borderRadius: 10,
     padding: 12,
     marginBottom: 10,
   },
   fileGridCard: {
-    width: "48.5%",
-    minHeight: 150,
+    width: "31.5%",
+    minHeight: 116,
     backgroundColor: "#fff",
-    borderRadius: 14,
-    padding: 14,
+    borderRadius: 8,
+    padding: 10,
     marginBottom: 10,
     justifyContent: "space-between",
   },
@@ -449,8 +434,7 @@ const styles = StyleSheet.create({
   iconBox: {
     width: 34,
     height: 34,
-    borderRadius: 10,
-    backgroundColor: "#059669",
+    borderRadius: 8,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 10,
@@ -467,12 +451,15 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   fileName: {
-    fontWeight: "700",
+    fontWeight: "800",
     color: "#111827",
+    fontSize: 11,
   },
   fileMeta: {
-    marginTop: 2,
+    marginTop: 3,
     color: "#6B7280",
+    fontSize: 10,
+    fontWeight: "700",
   },
   emptyState: {
     backgroundColor: "#fff",

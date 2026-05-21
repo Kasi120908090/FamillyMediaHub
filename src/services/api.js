@@ -37,7 +37,13 @@ async function parseResponse(response) {
   if (!response.ok) {
     const validationDetail = Array.isArray(payload?.detail)
       ? payload.detail
-          .map((item) => item?.msg || item?.message)
+          .map((item) => {
+            const location = Array.isArray(item?.loc)
+              ? item.loc.filter((part) => part !== "body").join(".")
+              : "";
+            const message = item?.msg || item?.message;
+            return location && message ? `${location}: ${message}` : message;
+          })
           .filter(Boolean)
           .join("\n")
       : "";
@@ -55,7 +61,7 @@ async function parseResponse(response) {
 }
 
 export async function apiRequest(endpoint, options = {}) {
-  const { token, body, headers, ...restOptions } = options;
+  const { token, body, rawBody, headers, ...restOptions } = options;
   const requestHeaders = {
     ...defaultJsonHeaders,
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -68,7 +74,9 @@ export async function apiRequest(endpoint, options = {}) {
     headers: requestHeaders,
   };
 
-  if (body !== undefined) {
+  if (rawBody !== undefined) {
+    requestOptions.body = rawBody;
+  } else if (body !== undefined) {
     if (isFormData(body)) {
       delete requestHeaders["Content-Type"];
       requestOptions.body = body;

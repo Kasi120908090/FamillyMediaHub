@@ -10,6 +10,7 @@ export default function VideoPlayer({
   nativeControls = true,
   allowsFullscreen = true,
   fullscreen,
+  fullscreenOptions,
   surfaceType,
   loop = false,
   muted = false,
@@ -17,7 +18,8 @@ export default function VideoPlayer({
   shouldPlay = false,
   onFirstFrameRender,
 }) {
-  const canFullscreen = fullscreen ?? allowsFullscreen;
+  const resolvedFullscreenOptions =
+    fullscreenOptions ?? { enable: fullscreen ?? allowsFullscreen };
   const videoSource = useMemo(() => getVideoSource(source), [source]);
   const player = useVideoPlayer(videoSource, (videoPlayer) => {
     videoPlayer.loop = loop;
@@ -75,7 +77,7 @@ export default function VideoPlayer({
         contentFit={contentFit}
         nativeControls={nativeControls}
         posterSource={posterSource}
-        allowsFullscreen={canFullscreen}
+        fullscreenOptions={resolvedFullscreenOptions}
         surfaceType={surfaceType}
         allowsPictureInPicture
         startsPictureInPictureAutomatically={false}

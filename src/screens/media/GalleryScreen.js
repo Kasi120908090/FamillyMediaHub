@@ -23,13 +23,27 @@ import ImageViewer from "../../components/media/ImageViewer";
 import VideoPlayer from "../../components/media/VideoPlayer"; // Assuming this path based on VideosScreen.js
 import VideoThumbnail from "../../components/media/VideoThumbnail";
 import ZoomableMedia from "../../components/media/ZoomableMedia";
+import {
+  FadeInView,
+  FileChip,
+  ImageTile,
+  MediaBadge,
+  PlayButton,
+  SearchFilterBar,
+  formatDuration,
+  getFriendlyTitle,
+  getReadableSize,
+  sharedStyles,
+  softShadow,
+  ui,
+} from "../../components/media/MediaDesign";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
 import { getMediaUri, getVideoThumbnailUri } from "../../utils/media";
 
-const GRID_COLUMNS = 3;
-const GRID_GAP = 3;
+const GRID_COLUMNS = 4;
+const GRID_GAP = 10;
 
 const getNormalizedCategory = (item) => {
   if (item?.category === "images" || item?.content_type?.startsWith("image/")) {
@@ -126,6 +140,7 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
     selectedChild,
     canManageMedia,
     isChildAccount,
+    loadChildMedia,
     moveMediaToRecycleBin,
   } = useProfile();
   const { theme } = useTheme();
@@ -145,6 +160,8 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
   const [currentVideoThumbnailUri, setCurrentVideoThumbnailUri] = useState(null);
   const [hasVideoFirstFrame, setHasVideoFirstFrame] = useState(false);
   const [showVideoCover, setShowVideoCover] = useState(false);
+  const [isMediaLoading, setIsMediaLoading] = useState(false);
+  const [mediaLoadError, setMediaLoadError] = useState("");
 
   const scopedMediaItems = useMemo(() => {
     if (!isChildAccount || !selectedChildId) {
@@ -249,6 +266,35 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
   );
 
   const hasActiveFilters = Boolean(startDate || endDate || !isGridView || isDateReversed);
+
+  useFocusEffect(
+    useCallback(() => {
+      let isActive = true;
+
+      const hydrateMedia = async () => {
+        setIsMediaLoading(true);
+        setMediaLoadError("");
+
+        try {
+          await loadChildMedia(isChildAccount ? selectedChildId : null);
+        } catch (error) {
+          if (isActive) {
+            setMediaLoadError(error.message || "Unable to load media right now.");
+          }
+        } finally {
+          if (isActive) {
+            setIsMediaLoading(false);
+          }
+        }
+      };
+
+      hydrateMedia();
+
+      return () => {
+        isActive = false;
+      };
+    }, [isChildAccount, loadChildMedia, selectedChildId])
+  );
 
   const openViewer = (item) => {
     const itemId = getMediaItemId(item);
@@ -386,12 +432,23 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
         windowSize={7}
         ListHeaderComponent={
           <>
+            <SearchFilterBar
+              value={searchQuery}
+              onChangeText={setSearchQuery}
+              onClear={() => setSearchQuery("")}
+              onFilterPress={() => setFilterVisible(true)}
+              active={hasActiveFilters}
+            />
+
             {highlightItems.length ? (
               <>
                 <View style={styles.sectionHeader}>
-                  <Text style={[styles.sectionTitle, { color: theme.text }]}>Recent Highlights</Text>
+                  <View style={styles.sectionTitleRow}>
+                    <Ionicons name="sparkles" size={13} color={theme.primary} />
+                    <Text style={[styles.sectionTitle, { color: theme.text }]}>Recent Highlights</Text>
+                  </View>
                   <TouchableOpacity onPress={() => navigation.navigate("Images")}>
-                    {/* <Text style={[styles.link, { color: theme.primary }]}>See all</Text> */}
+                    <Ionicons name="chevron-forward" size={17} color={theme.primary} />
                   </TouchableOpacity>
                 </View>
 
@@ -402,22 +459,13 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
                   keyExtractor={(item, index) => getMediaItemKey(item, index, "highlight")}
                   contentContainerStyle={styles.highlightsContent}
                   renderItem={({ item }) => (
-                    <TouchableOpacity
-                      activeOpacity={0.88}
+                    <ImageTile
+                      uri={getMediaUri(item)}
                       style={styles.highlightCard}
                       onPress={() => openViewer(item)}
-                    >
-                      <Image source={{ uri: getMediaUri(item) }} style={styles.highlightImage} />
-                      <View style={styles.highlightOverlay} />
-                      <View style={styles.highlightTextWrap}>
-                        <Text style={styles.highlightTitle} numberOfLines={1}>
-                          {item.original_file_name || item.stored_file_name || "Highlight"}
-                        </Text>
-                        <Text style={styles.highlightSubtitle}>
-                          {selectedChild?.name || viewerProfile.name}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
+                      title={getFriendlyTitle(item, "Garden Play")}
+                      meta={formatShortDate(getItemDate(item)).replace(",", "")}
+                    />
                   )}
                 />
               </>
@@ -429,52 +477,20 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
               <StatCard label="Files" value={stats.files} color={theme.secondary} theme={theme} />
             </View> */}
 
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>Recent Uploads</Text>
-              <TouchableOpacity onPress={() => navigation.navigate("Upload")}>
-                {/* <Text style={[styles.link, { color: theme.primary }]}>Upload more</Text> */}
-              </TouchableOpacity>
-            </View>
-
-            <View style={styles.toolbarRow}>
-              <View style={[styles.searchBox, { backgroundColor: theme.card, borderColor: theme.border }]}>
-                <Ionicons name="search" size={17} color={theme.subText} />
-                <TextInput
-                  placeholder="Search memories, files and more..."
-                  placeholderTextColor={theme.subText}
-                  style={[styles.searchInput, { color: theme.text }]}
-                  value={searchQuery}
-                  onChangeText={setSearchQuery}
-                />
-                {searchQuery ? (
-                  <TouchableOpacity onPress={() => setSearchQuery("")} activeOpacity={0.8}>
-                    <Ionicons name="close-circle" size={18} color={theme.subText} />
-                  </TouchableOpacity>
-                ) : null}
-              </View>
-              <TouchableOpacity
-                style={[
-                  styles.filterButton,
-                  {
-                    backgroundColor: hasActiveFilters ? theme.primary : theme.card,
-                    borderColor: theme.border,
-                  },
-                ]}
-                onPress={() => setFilterVisible(true)}
-                activeOpacity={0.85}
-              >
-                <Ionicons
-                  name="options-outline"
-                  size={21}
-                  color={hasActiveFilters ? theme.buttonText : theme.text}
-                />
-              </TouchableOpacity>
-            </View>
           </>
         }
         renderItem={({ item: group, index }) => (
-          <View style={styles.group}>
-            <Text style={[styles.groupTitle, { color: theme.subText }]}>{group.title}</Text>
+          <FadeInView style={styles.group} delay={Math.min(index * 35, 160)}>
+            <View style={styles.groupHeader}>
+              <View style={styles.groupTitleWrap}>
+                <Ionicons name="calendar-outline" size={13} color={theme.primary} />
+                <Text style={[styles.groupTitle, { color: theme.text }]}>{group.title}</Text>
+                <Text style={[styles.groupDate, { color: theme.subText }]}>
+                  {formatShortDate(group.date)}
+                </Text>
+              </View>
+              <Ionicons name="chevron-down" size={16} color={theme.primary} />
+            </View>
             {isGridView ? (
               <FlatList
                 data={group.items}
@@ -511,13 +527,26 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
                         <Image source={{ uri: getMediaUri(item) }} style={styles.mediaPreview} />
                       )}
                       {getNormalizedCategory(item) === "videos" && (
-                        <VideoThumbnail item={item} style={styles.mediaPreview} />
+                        <>
+                          <VideoThumbnail item={item} style={styles.mediaPreview} />
+                          <PlayButton small />
+                        </>
                       )}
                       {getNormalizedCategory(item) === "files" && (
-                        <View style={[styles.mediaPreview, styles.mediaFallback]}>
-                          <Ionicons name="document-text" size={24} color="#2563EB" />
-                        </View>
+                        <FileChip
+                          compact={false}
+                          name={item.original_file_name || item.stored_file_name || "Document"}
+                          type={item.content_type}
+                          size={getReadableSize(item)}
+                        />
                       )}
+                      {getNormalizedCategory(item) !== "files" ? (
+                        <MediaBadge icon={getNormalizedCategory(item) === "videos" ? "time-outline" : "image-outline"}>
+                          {getNormalizedCategory(item) === "videos"
+                            ? formatDuration(item.duration)
+                            : ""}
+                        </MediaBadge>
+                      ) : null}
                     </View>
                   </TouchableOpacity>
                 )}
@@ -567,16 +596,32 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
                 })}
               </View>
             )}
-          </View>
+          </FadeInView>
         )}
         ListEmptyComponent={
-          <View style={[styles.emptyState, { backgroundColor: theme.card }]}>
-            <Ionicons name="cloud-upload-outline" size={40} color={theme.primary} />
-            <Text style={[styles.emptyTitle, { color: theme.text }]}>No uploaded media yet</Text>
-            <Text style={[styles.emptySubtitle, { color: theme.subText }]}>
-              Use the Backup tab to upload your first image or video.
-            </Text>
-          </View>
+          isMediaLoading ? (
+            <View style={[styles.emptyState, { backgroundColor: theme.card }]}>
+              <ActivityIndicator size="large" color={theme.primary} />
+              <Text style={[styles.emptyTitle, { color: theme.text }]}>Loading your media</Text>
+              <Text style={[styles.emptySubtitle, { color: theme.subText }]}>
+                Bringing in your latest family photos, videos, and files.
+              </Text>
+            </View>
+          ) : (
+            <View style={[styles.emptyState, { backgroundColor: theme.card }]}>
+              <Ionicons
+                name={mediaLoadError ? "alert-circle-outline" : "cloud-upload-outline"}
+                size={40}
+                color={theme.primary}
+              />
+              <Text style={[styles.emptyTitle, { color: theme.text }]}>
+                {mediaLoadError ? "Unable to load media" : "No uploaded media yet"}
+              </Text>
+              <Text style={[styles.emptySubtitle, { color: theme.subText }]}>
+                {mediaLoadError || "Use the Backup tab to upload your first image or video."}
+              </Text>
+            </View>
+          )
         }
       />
 
@@ -759,10 +804,10 @@ const StatCard = ({ label, value, color, theme }) => (
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#F5F6FA",
+    backgroundColor: ui.bg,
   },
   scrollContent: {
-    paddingBottom: 24,
+    paddingBottom: 28,
   },
   avatar: {
     width: 34,
@@ -777,7 +822,7 @@ const styles = StyleSheet.create({
   },
   highlightsContent: {
     paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
-    paddingBottom: 8,
+    paddingBottom: 4,
   },
   toolbarRow: {
     flexDirection: "row",
@@ -808,36 +853,10 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   highlightCard: {
-    width: 260,
-    height: 160,
-    marginRight: 12,
-    borderRadius: 18,
-    overflow: "hidden",
-    backgroundColor: "#E5E7EB",
-  },
-  highlightImage: {
-    width: "100%",
-    height: "100%",
-  },
-  highlightOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "rgba(15,23,42,0.28)",
-  },
-  highlightTextWrap: {
-    position: "absolute",
-    left: 14,
-    right: 14,
-    bottom: 14,
-  },
-  highlightTitle: {
-    color: "#fff",
-    fontWeight: "700",
-    fontSize: 16,
-  },
-  highlightSubtitle: {
-    marginTop: 4,
-    color: "#E5E7EB",
-    fontSize: 12,
+    width: 72,
+    height: 72,
+    marginRight: 10,
+    borderRadius: 10,
   },
   statCard: {
     flex: 1,
@@ -855,39 +874,59 @@ const styles = StyleSheet.create({
     color: "#6B7280",
   },
   sectionHeader: {
-    marginTop: 22,
-    marginBottom: 10,
+    marginTop: 4,
+    marginBottom: 8,
     marginHorizontal: SCREEN_HORIZONTAL_PADDING,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 12,
+    fontWeight: "800",
     color: "#111827",
+  },
+  sectionTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
   },
   link: {
     color: "#2563EB",
     fontWeight: "600",
   },
   group: {
-    marginBottom: 16,
+    marginBottom: 12,
+  },
+  groupHeader: {
+    marginHorizontal: SCREEN_HORIZONTAL_PADDING,
+    marginBottom: 8,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  groupTitleWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 7,
   },
   groupTitle: {
-    marginHorizontal: SCREEN_HORIZONTAL_PADDING,
-    marginBottom: 10,
-    color: "#4B5563",
-    fontWeight: "600",
+    color: ui.ink,
+    fontSize: 12,
+    fontWeight: "800",
+  },
+  groupDate: {
+    fontSize: 10,
+    fontWeight: "700",
   },
   gridRow: {
     justifyContent: "flex-start",
     paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
   },
   mediaTile: {
-    borderRadius: 15,
+    borderRadius: 8,
     overflow: "hidden",
-    backgroundColor: "#E5E7EB",
+    backgroundColor: "#E9E7F5",
   },
   mediaList: {
     paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
@@ -990,7 +1029,7 @@ const styles = StyleSheet.create({
   mediaTileContent: {
     flex: 1,
     justifyContent: "center",
-    alignItems: "center",
+    alignItems: "stretch",
   },
   filterOverlay: {
     flex: 1,

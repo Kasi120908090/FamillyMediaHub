@@ -1,34 +1,68 @@
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect } from "react";
-import { ActivityIndicator, View, Text, StyleSheet, Image, StatusBar } from "react-native";
-import logo from "../../../assets/logo.png";
-import { useAuth } from "../../hooks/useAuth";
+import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
+import { FamilyHeroIllustration } from "../../components/auth/FlowPrimitives";
+
+const PROFILE_CACHE_KEY = "@family-media-hub/profile-options";
+const TOKEN_STORAGE_KEY = "@family-media-hub/token";
+const USER_STORAGE_KEY = "@family-media-hub/user";
 
 export default function SplashScreen({ navigation }) {
-  const { isBootstrapping } = useAuth();
-
   useEffect(() => {
-    if (isBootstrapping) {
-      return;
-    }
+    let isMounted = true;
 
-    const timer = setTimeout(() => {
-      navigation.replace("AuthProfile");
-    }, 600);
+    const bootstrap = async () => {
+      try {
+        const [[, cachedProfiles], [, storedToken], [, storedUser]] = await AsyncStorage.multiGet([
+          PROFILE_CACHE_KEY,
+          TOKEN_STORAGE_KEY,
+          USER_STORAGE_KEY,
+        ]);
 
-    return () => clearTimeout(timer);
-  }, [isBootstrapping, navigation]);
+        if (!isMounted) {
+          return;
+        }
+
+        const parsedProfiles = JSON.parse(cachedProfiles || "[]");
+        const hasCachedProfiles = Array.isArray(parsedProfiles) && parsedProfiles.length > 0;
+        const hasSession = Boolean(storedToken && storedUser);
+
+        setTimeout(() => {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: hasCachedProfiles || hasSession ? "AuthProfile" : "Welcome" }],
+          });
+        }, 900);
+      } catch {
+        if (!isMounted) {
+          return;
+        }
+
+        setTimeout(() => {
+          navigation.reset({
+            index: 0,
+            routes: [{ name: "Welcome" }],
+          });
+        }, 900);
+      }
+    };
+
+    bootstrap();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [navigation]);
 
   return (
     <View style={styles.container}>
-      <StatusBar hidden />
-      <Image
-        source={logo}
-        style={styles.logo}
-        fadeDuration={0} // Performance: Prevents fade-in delay on Android
-        resizeMode="contain"
-      />
-      <Text style={styles.text}>Photos App</Text>
-      <ActivityIndicator style={styles.loader} color="#fff" />
+      <View style={styles.glow} />
+      <View style={styles.card}>
+        <FamilyHeroIllustration />
+        <Text style={styles.title}>Family Media Hub</Text>
+        <Text style={styles.subtitle}>Loading your family space...</Text>
+        <ActivityIndicator size="small" color="#5A23E5" style={styles.loader} />
+      </View>
     </View>
   );
 }
@@ -36,21 +70,47 @@ export default function SplashScreen({ navigation }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#c4ced9",
-    justifyContent: "center",
+    backgroundColor: "#FCF9FF",
     alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 24,
   },
-  logo: {
-    width: 120,
-    height: 120,
-    marginBottom: 20,
+  glow: {
+    position: "absolute",
+    width: 320,
+    height: 320,
+    borderRadius: 160,
+    backgroundColor: "rgba(129, 99, 255, 0.12)",
   },
-  text: {
-    fontSize: 24,
-    color: "#fff",
-    fontWeight: "bold",
+  card: {
+    width: "100%",
+    maxWidth: 360,
+    borderRadius: 28,
+    backgroundColor: "#FFFFFF",
+    alignItems: "center",
+    justifyContent: "center",
+    paddingHorizontal: 20,
+    paddingVertical: 24,
+    borderWidth: 1,
+    borderColor: "#F2EAFF",
+    shadowColor: "#7C4DFF",
+    shadowOpacity: 0.1,
+    shadowRadius: 22,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 10,
+  },
+  title: {
+    marginTop: 8,
+    fontSize: 26,
+    fontWeight: "900",
+    color: "#2D158B",
+  },
+  subtitle: {
+    marginTop: 8,
+    fontSize: 13,
+    color: "#8C80B8",
   },
   loader: {
-    marginTop: 16,
+    marginTop: 18,
   },
 });

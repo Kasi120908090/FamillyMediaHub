@@ -166,23 +166,25 @@ export default function MenuDrawer({ visible, onClose }) {
 
   return (
     <Modal
-      animationType="fade"
+      animationType="slide"
       transparent
       visible={visible}
       onRequestClose={onClose}
     >
       <View style={styles.overlay}>
         <View style={[styles.drawer, { backgroundColor: theme.surface }]}>
-          <View style={[styles.header, { borderBottomColor: theme.border }]}>
+          <View style={styles.header}>
             <TouchableOpacity style={styles.iconButton} onPress={onClose}>
-              <Ionicons name="menu" size={20} color={theme.text} />
+              <Ionicons name="close" size={20} color={theme.primary} />
             </TouchableOpacity>
-            <Text style={[styles.headerTitle, { color: theme.text }]}>Menu</Text>
             <View style={styles.iconButton} />
+            <TouchableOpacity style={styles.iconButton}>
+              <Ionicons name="notifications-outline" size={18} color={theme.primary} />
+            </TouchableOpacity>
           </View>
 
           <TouchableOpacity
-            style={[styles.profileCard, { backgroundColor: theme.card }]}
+            style={styles.profileCard}
             onPress={() => setAccountsVisible((current) => !current)}
           >
             <ThemedAvatar
@@ -258,42 +260,7 @@ export default function MenuDrawer({ visible, onClose }) {
             ))}
           </View>
 
-          <View style={[styles.divider, { backgroundColor: theme.border }]} />
-
-          <TouchableOpacity
-            style={styles.menuItem}
-            onPress={() => handleRoutePress("Profile")}
-          >
-            <View style={[styles.menuIcon, { backgroundColor: theme.iconBg }]}>
-              <Ionicons name="settings" size={18} color={theme.subText} />
-            </View>
-            <View style={styles.menuText}>
-              <Text style={[styles.menuTitle, { color: theme.text }]}>Settings</Text>
-            </View>
-            <Ionicons name="chevron-forward" size={16} color={theme.subText} />
-          </TouchableOpacity>
-
           <View style={styles.spacer} />
-
-          <View style={[styles.storageCard, { backgroundColor: theme.card }]}>
-            <View style={styles.storageRow}>
-              <View style={styles.storageTitleRow}>
-                <Ionicons name="cloud" size={18} color={theme.primary} />
-                <Text style={[styles.storageTitle, { color: theme.text }]}>Storage</Text>
-              </View>
-              <Text style={[styles.storageText, { color: theme.subText }]}>12.8 GB / 15 GB</Text>
-            </View>
-            <View style={[styles.progressTrack, { backgroundColor: theme.border }]}>
-              <View style={[styles.progressFill, { backgroundColor: theme.primary }]} />
-            </View>
-            <View style={styles.storageFooter}>
-              <Text style={[styles.storageSub, { color: theme.subText }]}>85% used</Text>
-              <TouchableOpacity style={styles.upgradeButton}>
-                <Text style={[styles.upgradeText, { color: theme.primary }]}>Upgrade</Text>
-                <Ionicons name="arrow-forward" size={12} color={theme.primary} />
-              </TouchableOpacity>
-            </View>
-          </View>
 
           <TouchableOpacity
             style={styles.signOutButton}
@@ -324,11 +291,11 @@ const styles = StyleSheet.create({
   },
 
   drawer: {
-    width: "76%",
+    width: "58%",
     maxWidth: 330,
-    minWidth: 280,
+    minWidth: 230,
     backgroundColor: "#fff",
-    paddingHorizontal: 20,
+    paddingHorizontal: 22,
     paddingBottom: 18,
     shadowColor: "#000",
     shadowOpacity: 0.12,
@@ -338,18 +305,17 @@ const styles = StyleSheet.create({
 
   scrim: {
     flex: 1,
-    backgroundColor: "rgba(0,0,0,0.48)",
+    backgroundColor: "rgba(16,20,69,0.22)",
   },
 
   header: {
-    height: 56,
+    height: 70,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    borderBottomWidth: 1,
-    borderBottomColor: "#F1F5F9",
     marginHorizontal: -20,
     paddingHorizontal: 16,
+    paddingTop: 26,
     marginBottom: 16,
   },
 
@@ -369,8 +335,8 @@ const styles = StyleSheet.create({
   profileCard: {
     flexDirection: "row",
     alignItems: "center",
-    backgroundColor: "#F8FAFC",
-    borderRadius: 12,
+    backgroundColor: "transparent",
+    borderRadius: 0,
     padding: 12,
     gap: 12,
     marginBottom: 22,
@@ -387,13 +353,13 @@ const styles = StyleSheet.create({
   },
 
   profileName: {
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: "700",
     color: "#111827",
   },
 
   profileEmail: {
-    fontSize: 11,
+    fontSize: 10,
     color: "#6B7280",
     marginTop: 2,
   },
@@ -409,7 +375,7 @@ const styles = StyleSheet.create({
   },
 
   accountRow: {
-    minHeight: 52,
+    minHeight: 56,
     borderRadius: 12,
     paddingHorizontal: 10,
     flexDirection: "row",
@@ -435,9 +401,9 @@ const styles = StyleSheet.create({
   },
 
   menuIcon: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
     marginRight: 14,
@@ -544,7 +510,7 @@ const styles = StyleSheet.create({
 
   signOutButton: {
     minHeight: 48,
-    borderRadius: 10,
+    borderRadius: 8,
     backgroundColor: "#FEF2F2",
     flexDirection: "row",
     alignItems: "center",
