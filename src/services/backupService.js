@@ -18,8 +18,23 @@ const getBytesReceived = (response) =>
       0
   );
 
-const getBackupItems = (response) =>
-  Array.isArray(response) ? response : response?.items || response?.backups || response?.data || [];
+const normalizeBackupItem = (item = {}) => ({
+  ...item,
+  id: item.id || item.backup_id || item.upload_id || item.file_id || item.uuid,
+  file_name:
+    item.file_name || item.filename || item.name || item.original_file_name || item.original_name || "Backup file",
+  file_size: Number(item.file_size || item.size || item.bytes || item.fileSize || 0),
+  content_type: item.content_type || item.mime_type || item.mimeType || "application/octet-stream",
+  status: item.status || item.state || item.upload_status || "UNKNOWN",
+  completed_at:
+    item.completed_at || item.uploaded_at || item.created_at || item.timestamp || item.createdAt || "",
+  file_path: item.file_path || item.path || item.uri || item.url || item.download_url || item.fileUri,
+});
+
+const getBackupItems = (response) => {
+  const items = Array.isArray(response) ? response : response?.items || response?.backups || response?.data || [];
+  return Array.isArray(items) ? items.map(normalizeBackupItem) : [];
+};
 
 const createBackupInitBody = (item, sha256Hash) => ({
   filename: item.file_name,

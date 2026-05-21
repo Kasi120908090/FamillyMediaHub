@@ -33,6 +33,14 @@ const formatBytes = (bytes = 0) => {
   return `${(value / (1024 * 1024)).toFixed(value > 10 * 1024 * 1024 ? 0 : 1)} MB`;
 };
 
+const formatDate = (value) => {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+  return date.toLocaleDateString();
+};
+
 export default function BackupDashboardScreen({ navigation }) {
   const { authToken, currentUser, parentDevices, refreshDevices } = useAuth();
   const [queueItems, setQueueItems] = useState([]);
@@ -240,6 +248,23 @@ export default function BackupDashboardScreen({ navigation }) {
           : Platform.OS === "ios"
           ? "iPhone"
           : "Current device";
+
+      const makeMacAddress = (seed) => {
+        const normalized = String(seed || "family-hub");
+        const bytes = Array.from({ length: 6 }, (_, idx) => {
+          let value = 0;
+          for (let i = idx; i < normalized.length; i += 6) {
+            value = (value + normalized.charCodeAt(i) * (idx + 1)) & 0xff;
+          }
+          return value;
+        });
+        return bytes.map((byte) => byte.toString(16).padStart(2, "0")).join(":").toUpperCase();
+      };
+
+      const macAddress = makeMacAddress(
+        `${currentUser?.id || currentUser?.username || "user"}-${Platform.OS}`
+      );
+
       const devicePayload = {
         device_name: deviceName,
         name: deviceName,
@@ -247,7 +272,7 @@ export default function BackupDashboardScreen({ navigation }) {
           Platform.OS === "android" || Platform.OS === "ios" ? Platform.OS : "web",
         platform: Platform.OS || "mobile",
         serial_number: `family-hub-${currentUser?.id || currentUser?.username || "user"}-${Platform.OS}`,
-        mac_address: `family-hub-${currentUser?.id || currentUser?.username || "user"}-${Platform.OS}`,
+        mac_address: macAddress,
       };
       const createdDevice = await userService.createDevice(devicePayload, authToken);
       const nextDeviceId = createdDevice?.id;
@@ -444,6 +469,37 @@ export default function BackupDashboardScreen({ navigation }) {
               </TouchableOpacity>
             )}
           </View>
+
+          <View style={styles.queueListHeader}>
+            <Text style={styles.sectionTitle}>Backed-up Files</Text>
+            <Text style={styles.sectionMeta}>{backupItems.length} available</Text>
+          </View>
+
+          {backupItems.length ? (
+            <View style={styles.queueList}>
+              {backupItems.map((item) => (
+                <View key={item.id || item.file_name} style={styles.queueRow}>
+                  <View style={styles.fileIcon}>
+                    <Ionicons name="cloud-done-outline" size={18} color="#5B3FFF" />
+                  </View>
+                  <View style={styles.fileInfo}>
+                    <Text style={styles.fileName} numberOfLines={1}>
+                      {item.file_name}
+                    </Text>
+                    <Text style={styles.fileMeta} numberOfLines={1}>
+                      {item.status} · {formatBytes(item.file_size)}{item.completed_at ? ` · ${formatDate(item.completed_at)}` : ""}
+                    </Text>
+                  </View>
+                </View>
+              ))}
+            </View>
+          ) : (
+            <View style={styles.emptyCard}>
+              <Ionicons name="cloud-offline-outline" size={28} color="#5B3FFF" />
+              <Text style={styles.emptyTitle}>No backups found</Text>
+              <Text style={styles.emptyText}>The backend does not have any completed backup records yet.</Text>
+            </View>
+          )}
         </View>
 
         <View style={styles.queueListHeader}>
