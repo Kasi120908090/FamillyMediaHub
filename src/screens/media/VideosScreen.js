@@ -262,20 +262,22 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
   };
 
   const renderVideoCard = (item, index, sectionTitle) => {
-    const title = item.original_file_name || item.stored_file_name || "Video";
-
     if (isGridView) {
       return (
         <TouchableOpacity
           key={getVideoItemKey(item, index)}
-          style={[styles.gridCard, { backgroundColor: theme.card }]}
+          style={[
+            styles.gridCard,
+            (index + 1) % 3 !== 0 && styles.gridCardGap,
+            { backgroundColor: theme.card },
+          ]}
           onPress={() => openVideo(item)}
           activeOpacity={0.88}
         >
           <View style={styles.gridPreviewWrap}>
             <VideoThumbnail item={item} style={styles.gridPreview} />
-          <PlayButton small />
-          <MediaBadge>{formatDuration(item.duration)}</MediaBadge>
+            <PlayButton small />
+            <MediaBadge>{formatDuration(item.duration)}</MediaBadge>
           </View>
           <Text style={[styles.gridTitle, { color: theme.text }]} numberOfLines={1}>
             {getFriendlyTitle(item, "Video")}
@@ -661,7 +663,7 @@ const styles = StyleSheet.create({
   gridWrap: {
     flexDirection: "row",
     flexWrap: "wrap",
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
   },
   gridCard: {
     width: "31.5%",
@@ -669,6 +671,9 @@ const styles = StyleSheet.create({
     padding: 0,
     marginBottom: 10,
     overflow: "hidden",
+  },
+  gridCardGap: {
+    marginRight: "2.75%",
   },
   gridPreviewWrap: {
     aspectRatio: 1,

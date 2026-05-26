@@ -42,7 +42,7 @@ import { useTheme } from "../../context/ThemeContext";
 import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
 import { getMediaUri, getVideoThumbnailUri } from "../../utils/media";
 
-const GRID_COLUMNS = 4;
+const GRID_COLUMNS = 3;
 const GRID_GAP = 10;
 
 const getNormalizedCategory = (item) => {
@@ -495,7 +495,7 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
               <FlatList
                 data={group.items}
                 keyExtractor={(item, itemIndex) => getMediaItemKey(item, itemIndex, `${group.title}-${index}`)}
-                numColumns={3}
+                numColumns={GRID_COLUMNS}
                 scrollEnabled={false}
                 columnWrapperStyle={styles.gridRow}
                 renderItem={({ item, index: itemIndex }) => (

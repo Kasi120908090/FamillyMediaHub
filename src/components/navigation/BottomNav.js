@@ -14,12 +14,13 @@ const BottomNav = ({ activeTab }) => {
   const { theme } = useTheme();
   const { canManageMedia } = useProfile();
   const focusedTab = activeTab || route.name;
+  const showUploadShortcut = !["BackupDashboard", "BackupSettings"].includes(focusedTab);
   const tabs = [
     { id: "Gallery", icon: "images-outline", activeIcon: "images", label: "Gallery" },
     { id: "Images", icon: "image-outline", activeIcon: "image", label: "Images" },
     { id: "Videos", icon: "videocam-outline", activeIcon: "videocam", label: "Videos" },
     { id: "Files", icon: "folder-outline", activeIcon: "folder", label: "Files" },
-    { id: "BackupDashboard", icon: "cloud-upload-outline", activeIcon: "cloud-upload", label: "Back up" },
+    { id: "BackupSettings", icon: "cloud-upload-outline", activeIcon: "cloud-upload", label: "Back up" },
   ];
 
   const [uploadOptionsVisible, setUploadOptionsVisible] = useState(false);
@@ -49,7 +50,9 @@ const BottomNav = ({ activeTab }) => {
         ]}
       >
         {tabs.map((tab) => {
-          const isActive = focusedTab === tab.id;
+          const isActive =
+            focusedTab === tab.id ||
+            (tab.id === "BackupSettings" && focusedTab === "BackupDashboard");
           return (
             <TouchableOpacity
               key={tab.id}
@@ -79,21 +82,22 @@ const BottomNav = ({ activeTab }) => {
         })}
       </View>
 
-      <View style={[styles.centerButtonWrapper, softShadow]}>
-        <Pressable
-          style={({ pressed }) => [
-            styles.centerButton,
-            { backgroundColor: theme.primary },
-            !canManageMedia && styles.navItemDisabled,
-            pressed && styles.centerButtonPressed,
-          ]}
-          onPress={openUploadOptions}
-          hitSlop={10}
-        >
-          <Ionicons name="add" size={26} color="#fff" />
-        </Pressable>
-        <Text style={[styles.uploadLabel, { color: theme.primary }]}>Upload</Text>
-      </View>
+      {showUploadShortcut ? (
+        <View style={[styles.centerButtonWrapper, softShadow]}>
+          <Pressable
+            style={({ pressed }) => [
+              styles.centerButton,
+              { backgroundColor: theme.primary },
+              !canManageMedia && styles.navItemDisabled,
+              pressed && styles.centerButtonPressed,
+            ]}
+            onPress={openUploadOptions}
+            hitSlop={10}
+          >
+            <Ionicons name="add" size={26} color="#fff" />
+          </Pressable>
+        </View>
+      ) : null}
 
       <Modal visible={uploadOptionsVisible} transparent animationType="fade" onRequestClose={closeUploadOptions}>
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={closeUploadOptions} />
@@ -140,9 +144,9 @@ const styles = StyleSheet.create({
   centerButtonWrapper: {
     position: "absolute",
     right: 22,
-    bottom: 72,
+    bottom: 86,
     width: 54,
-    height: 66,
+    height: 54,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -198,11 +202,6 @@ const styles = StyleSheet.create({
   navText: {
     fontSize: 9,
     fontWeight: "700",
-  },
-  uploadLabel: {
-    marginTop: 2,
-    fontSize: 8,
-    fontWeight: "800",
   },
 });
 

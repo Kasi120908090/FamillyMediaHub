@@ -23,11 +23,11 @@ const passwordChecks = [
 
 export default function FirstLoginSetupScreen({ navigation }) {
   const { authToken, completeFirstLogin, currentUser, isSubmitting, logout } = useAuth();
+  const [step, setStep] = useState("email"); // email -> otp-password
   const [email, setEmail] = useState(currentUser?.email || "");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [otp, setOtp] = useState(Array(6).fill(""));
-  const [isOtpSent, setIsOtpSent] = useState(false);
   const [timer, setTimer] = useState(0);
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [confirmVisible, setConfirmVisible] = useState(false);
@@ -37,20 +37,15 @@ export default function FirstLoginSetupScreen({ navigation }) {
     if (!email.trim()) {
       return "Email is required.";
     }
-
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
     return emailRegex.test(email.trim()) ? "" : "Enter a valid email address.";
   }, [email]);
 
   useEffect(() => {
-    if (timer <= 0) {
-      return undefined;
-    }
-
+    if (timer <= 0) return undefined;
     const interval = setInterval(() => {
       setTimer((current) => Math.max(current - 1, 0));
     }, 1000);
-
     return () => clearInterval(interval);
   }, [timer]);
 
@@ -103,55 +98,52 @@ export default function FirstLoginSetupScreen({ navigation }) {
     }
   };
 
-  const sendOtp = async () => {
+  // STEP 1: Send OTP to email
+  const handleSendOtp = async () => {
     if (!email.trim() || emailError) {
       Alert.alert("Email required", emailError || "Enter a valid email address.");
       return;
     }
-
     try {
+      console.log("[FirstLogin] Sending OTP to:", email.trim());
+      console.log("[FirstLogin] Auth token:", authToken ? "present" : "MISSING");
+      
       await authService.sendFirstLoginOtp(email.trim(), authToken);
-      setIsOtpSent(true);
+      
+      console.log("[FirstLogin] OTP sent successfully");
+      setStep("otp");
       setTimer(60);
       Alert.alert("Verification code sent", `A code was sent to ${email.trim()}.`);
     } catch (error) {
-      Alert.alert("Unable to send code", error.message);
+      console.error("[FirstLogin] OTP sending failed:", error);
+      console.error("[FirstLogin] Error message:", error.message);
+      console.error("[FirstLogin] Error status:", error.status);
+      console.error("[FirstLogin] Error code:", error.code);
+      
+      const errorMsg = error.message || "Unable to send verification code";
+      Alert.alert("Unable to send code", errorMsg);
     }
   };
 
-  const handleSubmit = async () => {
-    if (!isOtpSent) {
-      await sendOtp();
-      return;
-    }
-
+  // STEP 2: Complete setup (Verify OTP and Set Password)
+  const handleSetPassword = async () => {
     const otpValue = otp.join("");
-
-    if (!email.trim() || emailError) {
-      Alert.alert("Email required", emailError || "Enter a valid email address.");
-      return;
-    }
-
     if (otpValue.length !== 6) {
       Alert.alert("Verification required", "Enter the 6-digit code sent to your email.");
       return;
     }
-
     if (!newPassword.trim()) {
       Alert.alert("Password required", "Create a new password to continue.");
       return;
     }
-
     if (!Object.values(passwordState).every(Boolean)) {
       Alert.alert("Weak password", "Please follow the password rules before continuing.");
       return;
     }
-
     if (newPassword !== confirmPassword) {
       Alert.alert("Password mismatch", "New password and confirm password must match.");
       return;
     }
-
     try {
       await completeFirstLogin({
         email: email.trim(),
@@ -159,7 +151,6 @@ export default function FirstLoginSetupScreen({ navigation }) {
         new_password: newPassword,
       });
       await logout();
-
       navigation.reset({
         index: 0,
         routes: [{ name: "AuthProfile" }],
@@ -169,125 +160,168 @@ export default function FirstLoginSetupScreen({ navigation }) {
     }
   };
 
+  const getTitle = () => {
+    if (step === "email") return "Let's set up\nyour account.";
+    return "Verify & Set\nPassword";
+  };
+
+  const getSubtitle = () => {
+    if (step === "email") return "Enter your email address to get started.";
+    return "Check your email for the code and create a strong password.";
+  };
+
   return (
     <AuthFlowShell>
       <View style={styles.heroRow}>
         <View style={styles.heroCopy}>
           <SectionTitle
-            title={"Let’s set up\nyour account."}
-            subtitle="Please update your email ID and password to continue."
+            title={getTitle()}
+            subtitle={getSubtitle()}
           />
         </View>
         <FamilyHeroIllustration locked />
       </View>
 
       <FlowCard>
-        <FlowInput
-          label="Email ID"
-          value={email}
-          onChangeText={setEmail}
-          placeholder="Enter your email ID"
-          keyboardType="email-address"
-          icon="mail-outline"
-          error={emailError}
-          editable={!isOtpSent}
-        />
-        <Text style={styles.helpText}>
-          This email will be used for notifications and account recovery.
-        </Text>
-
-        <FlowInput
-          label="New Password"
-          value={newPassword}
-          onChangeText={setNewPassword}
-          placeholder="Enter new password"
-          icon="lock-closed-outline"
-          secureTextEntry
-          secureVisible={passwordVisible}
-          onToggleSecure={() => setPasswordVisible((current) => !current)}
-        />
-
-        <FlowInput
-          label="Confirm Password"
-          value={confirmPassword}
-          onChangeText={setConfirmPassword}
-          placeholder="Confirm new password"
-          icon="checkmark-circle-outline"
-          secureTextEntry
-          secureVisible={confirmVisible}
-          onToggleSecure={() => setConfirmVisible((current) => !current)}
-        />
-
-        {isOtpSent ? (
-          <View style={styles.otpWrap}>
-            <Text style={styles.otpLabel}>Verification Code</Text>
-            <View style={styles.otpRow}>
-              {otp.map((digit, index) => (
-                <TextInput
-                  key={`otp-${index}`}
-                  ref={(input) => {
-                    otpRefs.current[index] = input;
-                  }}
-                  value={digit}
-                  onChangeText={(value) => handleOtpChange(value, index)}
-                  onKeyPress={(event) => handleOtpKeyPress(event, index)}
-                  keyboardType="number-pad"
-                  maxLength={1}
-                  style={styles.otpInput}
-                  textAlign="center"
-                  selectionColor="#5A23E5"
-                />
-              ))}
-            </View>
-          </View>
-        ) : null}
-
-        {isOtpSent ? (
-          <View style={styles.codeBanner}>
-            <Ionicons name="mail-open-outline" size={16} color="#6E4CDE" />
-            <Text style={styles.codeBannerText}>
-              Enter the 6-digit code we sent to your email.
-            </Text>
-          </View>
-        ) : null}
-
-        <View style={styles.rulesGrid}>
-          {passwordChecks.map((rule) => {
-            const isMet = passwordState[rule.key];
-            return (
-              <View key={rule.key} style={styles.ruleItem}>
-                <Ionicons
-                  name={isMet ? "checkmark-circle" : "ellipse-outline"}
-                  size={14}
-                  color={isMet ? "#7A4EFF" : "#CABEEB"}
-                />
-                <Text style={[styles.ruleText, isMet ? styles.ruleTextActive : null]}>
-                  {rule.label}
-                </Text>
-              </View>
-            );
-          })}
-        </View>
-
-        <PrimaryAction
-          label={isOtpSent ? "Update & Continue" : "Send Verification Code"}
-          onPress={handleSubmit}
-          loading={isSubmitting}
-          icon={isOtpSent ? "arrow-forward" : "mail-outline"}
-        />
-
-        {isOtpSent ? (
-          <View style={styles.secondaryActions}>
-            <SecondaryAction
-              label={timer > 0 ? `Resend in ${timer}s` : "Resend Code"}
-              onPress={sendOtp}
-              disabled={timer > 0 || isSubmitting}
+        {/* STEP 1: Email Input */}
+        {step === "email" && (
+          <>
+            <FlowInput
+              label="Email ID"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="Enter your email ID"
+              keyboardType="email-address"
+              icon="mail-outline"
+              error={emailError}
+              editable={true}
             />
-          </View>
-        ) : null}
+            <Text style={styles.helpText}>
+              This email will be used for notifications and account recovery.
+            </Text>
+
+            <PrimaryAction
+              label="Send Verification Code"
+              onPress={handleSendOtp}
+              loading={isSubmitting}
+              icon="mail-outline"
+            />
+          </>
+        )}
+
+        {/* STEP 2: OTP Verification */}
+        {step === "otp" && (
+          <>
+            <View style={styles.emailDisplay}>
+              <Ionicons name="mail-outline" size={16} color="#7A4EFF" />
+              <Text style={styles.emailDisplayText}>{email}</Text>
+            </View>
+
+            <View style={styles.otpWrap}>
+              <Text style={styles.otpLabel}>Enter 6-digit Code</Text>
+              <View style={styles.otpRow}>
+                {otp.map((digit, index) => (
+                  <TextInput
+                    key={`otp-${index}`}
+                    ref={(input) => {
+                      otpRefs.current[index] = input;
+                    }}
+                    value={digit}
+                    onChangeText={(value) => handleOtpChange(value, index)}
+                    onKeyPress={(event) => handleOtpKeyPress(event, index)}
+                    keyboardType="number-pad"
+                    maxLength={1}
+                    style={styles.otpInput}
+                    textAlign="center"
+                    selectionColor="#5A23E5"
+                  />
+                ))}
+              </View>
+            </View>
+
+            <View style={styles.codeBanner}>
+              <Ionicons name="info-circle-outline" size={16} color="#6E4CDE" />
+              <Text style={styles.codeBannerText}>
+                Check your email for the verification code.
+              </Text>
+            </View>
+
+            <FlowInput
+              label="New Password"
+              value={newPassword}
+              onChangeText={setNewPassword}
+              placeholder="Enter new password"
+              icon="lock-closed-outline"
+              secureTextEntry
+              secureVisible={passwordVisible}
+              onToggleSecure={() => setPasswordVisible((current) => !current)}
+            />
+
+            <FlowInput
+              label="Confirm Password"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              placeholder="Confirm new password"
+              icon="checkmark-circle-outline"
+              secureTextEntry
+              secureVisible={confirmVisible}
+              onToggleSecure={() => setConfirmVisible((current) => !current)}
+            />
+
+            <View style={styles.rulesGrid}>
+              {passwordChecks.map((rule) => {
+                const isMet = passwordState[rule.key];
+                return (
+                  <View key={rule.key} style={styles.ruleItem}>
+                    <Ionicons
+                      name={isMet ? "checkmark-circle" : "ellipse-outline"}
+                      size={14}
+                      color={isMet ? "#7A4EFF" : "#CABEEB"}
+                    />
+                    <Text style={[styles.ruleText, isMet ? styles.ruleTextActive : null]}>
+                      {rule.label}
+                    </Text>
+                  </View>
+                );
+              })}
+            </View>
+
+            <PrimaryAction
+              label="Complete Setup"
+              onPress={handleSetPassword}
+              loading={isSubmitting}
+              icon="checkmark"
+            />
+
+            <View style={styles.secondaryActions}>
+              <SecondaryAction
+                label={timer > 0 ? `Resend in ${timer}s` : "Resend Code"}
+                onPress={handleSendOtp}
+                disabled={timer > 0 || isSubmitting}
+              />
+              <SecondaryAction
+                label="Change Email"
+                onPress={() => {
+                  setStep("email");
+                  setOtp(Array(6).fill(""));
+                  setTimer(0);
+                  setNewPassword("");
+                  setConfirmPassword("");
+                  setPasswordVisible(false);
+                  setConfirmVisible(false);
+                }}
+                disabled={isSubmitting}
+              />
+            </View>
+          </>
+        )}
       </FlowCard>
 
-      <InfoBanner text="Your account will be fully activated after the email verification code is confirmed." />
+      <InfoBanner text={
+        step === "email" 
+          ? "Enter your email to receive a verification code."
+          : "Your account will be activated after you verify your email and set a new password."
+      } />
     </AuthFlowShell>
   );
 }
@@ -309,6 +343,21 @@ const styles = StyleSheet.create({
     fontSize: 10,
     lineHeight: 15,
     color: "#9B8FC5",
+  },
+  emailDisplay: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 8,
+    backgroundColor: "#F5F0FF",
+    marginBottom: 14,
+  },
+  emailDisplayText: {
+    marginLeft: 8,
+    fontSize: 12,
+    fontWeight: "600",
+    color: "#7A4EFF",
   },
   otpWrap: {
     marginBottom: 14,

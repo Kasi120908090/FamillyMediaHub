@@ -7,8 +7,17 @@ import {
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import StackNavigator from "./navigation/StackNavigator";
-import { ProfileProvider } from "./context/ProfileContext";
+import { ProfileProvider, useProfile } from "./context/ProfileContext";
 import { ThemeProvider, useTheme } from "./context/ThemeContext";
+import { useBackupAutoSync } from "./hooks/useBackupAutoSync";
+
+function BackupAutoSyncController() {
+  const { authToken, currentUser, parentDevices, refreshDevices } = useProfile();
+
+  useBackupAutoSync({ authToken, currentUser, parentDevices, refreshDevices });
+
+  return null;
+}
 
 function ThemedNavigation() {
   const { theme } = useTheme();
@@ -40,6 +49,7 @@ export default function App() {
       <SafeAreaProvider>
         <ThemeProvider>
           <ProfileProvider>
+            <BackupAutoSyncController />
             <ThemedNavigation />
           </ProfileProvider>
         </ThemeProvider>

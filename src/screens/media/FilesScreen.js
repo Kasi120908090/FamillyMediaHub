@@ -178,13 +178,18 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
     setIsDateReversed(false);
   };
 
-  const renderFileItem = ({ item }) => {
+  const renderFileItem = ({ item, index }) => {
     const fileName = item.original_file_name || item.stored_file_name || "Document";
 
     if (isGridView) {
       return (
         <TouchableOpacity
-          style={[styles.fileGridCard, softShadow, { backgroundColor: theme.card }]}
+          style={[
+            styles.fileGridCard,
+            (index + 1) % 3 !== 0 && styles.fileGridCardGap,
+            softShadow,
+            { backgroundColor: theme.card },
+          ]}
           onPress={() => setSelectedFile(item)}
           activeOpacity={0.86}
         >
@@ -410,7 +415,7 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   gridRow: {
-    justifyContent: "space-between",
+    justifyContent: "flex-start",
   },
   fileCard: {
     backgroundColor: "#fff",
@@ -426,6 +431,9 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 10,
     justifyContent: "space-between",
+  },
+  fileGridCardGap: {
+    marginRight: "2.75%",
   },
   fileLeft: {
     flexDirection: "row",

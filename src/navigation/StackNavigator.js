@@ -137,6 +137,7 @@ const EditProfileWithBottomNav = withBottomNav(EditProfileScreen);
 const NotificationsWithBottomNav = withBottomNav(NotificationsScreen);
 const AppearanceWithBottomNav = withBottomNav(AppearanceScreen);
 const BackupDashboardWithBottomNav = withBottomNav(BackupDashboardScreen);
+const BackupSettingsWithBottomNav = withBottomNav(BackupSettingsScreen);
 const GuardedFirstLoginSetupScreen = withRouteGuard(FirstLoginSetupScreen, {
   firstLoginOnly: true,
 });
@@ -155,7 +156,7 @@ const GuardedEditProfile = withRouteGuard(EditProfileWithBottomNav, { requireAut
 const GuardedNotifications = withRouteGuard(NotificationsWithBottomNav, { requireAuth: true });
 const GuardedAppearance = withRouteGuard(AppearanceWithBottomNav, { requireAuth: true });
 const GuardedBackupDashboard = withRouteGuard(BackupDashboardWithBottomNav, { requireAuth: true });
-const GuardedBackupSettings = withRouteGuard(BackupSettingsScreen, { requireAuth: true });
+const GuardedBackupSettings = withRouteGuard(BackupSettingsWithBottomNav, { requireAuth: true });
 
 const noSwipeBackScreens = [
   "Gallery",
@@ -178,6 +179,7 @@ const bottomNavScreens = [
   "Upload",
   "Profile",
   "Appearance",
+  "BackupSettings",
   "BackupDashboard",
 ];
 

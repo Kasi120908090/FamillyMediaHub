@@ -2,7 +2,14 @@ import { resolveMediaUri } from "../services/api";
 
 const firstValue = (...values) => values.find((value) => Boolean(value));
 
-export const getMediaUri = (item) => item?.previewUri || resolveMediaUri(item?.file_path);
+export const getMediaUri = (item) =>
+  resolveMediaUri(
+    item?.local_uri ||
+    item?.previewUri ||
+    item?.uri ||
+    item?.localUri ||
+    item?.file_path
+  );
 
 const getContentType = (uri) => {
   if (!uri) {

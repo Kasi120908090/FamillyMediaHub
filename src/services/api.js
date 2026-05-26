@@ -35,6 +35,9 @@ async function parseResponse(response) {
   const payload = isJson ? await response.json() : await response.text();
 
   if (!response.ok) {
+    console.warn("[API] Response error status:", response.status);
+    console.warn("[API] Response payload:", payload);
+    
     const validationDetail = Array.isArray(payload?.detail)
       ? payload.detail
           .map((item) => {
@@ -51,9 +54,11 @@ async function parseResponse(response) {
       validationDetail ||
       payload?.detail ||
       payload?.message ||
+      payload?.error ||
       (typeof payload === "string" && payload.trim()) ||
       "Something went wrong while talking to the server.";
 
+    console.warn("[API] Throwing error:", errorMessage);
     throw createApiError(errorMessage, response.status);
   }
 
@@ -111,7 +116,14 @@ export function resolveMediaUri(filePath) {
 
   const normalizedPath = String(filePath).replace(/\\/g, "/");
 
-  if (normalizedPath.startsWith("http://") || normalizedPath.startsWith("https://")) {
+  if (
+    normalizedPath.startsWith("http://") ||
+    normalizedPath.startsWith("https://") ||
+    normalizedPath.startsWith("file://") ||
+    normalizedPath.startsWith("content://") ||
+    normalizedPath.startsWith("data:") ||
+    normalizedPath.startsWith("ph://")
+  ) {
     return encodeURI(normalizedPath);
   }
 

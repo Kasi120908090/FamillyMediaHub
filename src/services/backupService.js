@@ -20,6 +20,7 @@ const getBytesReceived = (response) =>
 
 const normalizeBackupItem = (item = {}) => ({
   ...item,
+  // Normalize ID and basic metadata
   id: item.id || item.backup_id || item.upload_id || item.file_id || item.uuid,
   file_name:
     item.file_name || item.filename || item.name || item.original_file_name || item.original_name || "Backup file",
@@ -28,7 +29,19 @@ const normalizeBackupItem = (item = {}) => ({
   status: item.status || item.state || item.upload_status || "UNKNOWN",
   completed_at:
     item.completed_at || item.uploaded_at || item.created_at || item.timestamp || item.createdAt || "",
-  file_path: item.file_path || item.path || item.uri || item.url || item.download_url || item.fileUri,
+  
+  // Ensure pathing is consistent for the media utilities
+  file_path: item.file_path || item.path || item.uri || item.url || item.download_url || item.fileUri || item.stored_file_name,
+  uri: item.uri || item.url || item.local_uri || item.file_path || item.path || item.stored_file_name,
+  
+  stored_file_name: item.stored_file_name || item.file_name || item.filename,
+  
+  // Add kind/category for filtering in Gallery/Images screens
+  kind: (item.content_type?.startsWith('video/') || /\.(mp4|mov|mkv|avi)$/i.test(item.file_name)) ? 'video' : 
+        (item.content_type?.startsWith('image/') || /\.(jpg|jpeg|png|heic|webp)$/i.test(item.file_name)) ? 'photo' : 'file',
+
+  // Flag for UI to show "Processing" label
+  is_processing: (item.status || "").toUpperCase() !== "COMPLETE" && (item.status || "").toUpperCase() !== "SUCCESS",
 });
 
 const getBackupItems = (response) => {
@@ -173,8 +186,8 @@ const computeFileHash = async (item, onProgress) => {
 };
 
 export const backupService = {
-  checkHealth: async (token) => {
-    const response = await apiRequest(ENDPOINTS.backup.health, { token });
+  checkHealth: async (token, options = {}) => {
+    const response = await apiRequest(ENDPOINTS.backup.health, { token, ...options });
     await backupQueueMetaStore.merge({
       last_health_ok_at: new Date().toISOString(),
       last_health_error: "",
@@ -211,6 +224,10 @@ export const backupService = {
     const emitProgress = (progress) => options.onProgress?.({ item: current, ...progress });
 
     try {
+      if (Number(current.file_size || 0) < 1) {
+        throw new Error("File is empty (0 bytes) and cannot be backed up.");
+      }
+
       current = await backupQueueStore.update(current.id, {
         status: BACKUP_QUEUE_STATUS.UPLOADING,
         error: "",
@@ -333,14 +350,19 @@ export const backupService = {
       : await backupQueueStore.getActive();
     const completed = [];
 
+    let hasFailures = false;
     for (const item of activeItems) {
-      const latest = await backupQueueStore.getById(item.id);
-
-      if (!latest || latest.status === BACKUP_QUEUE_STATUS.COMPLETE) {
-        continue;
+      try {
+        const latest = await backupQueueStore.getById(item.id);
+        if (!latest || latest.status === BACKUP_QUEUE_STATUS.COMPLETE) {
+          continue;
+        }
+        const result = await backupService.syncQueueItem(latest, token, options);
+        completed.push(result);
+      } catch (error) {
+        console.error(`[Backup] Failed to sync item ${item.id}:`, error);
+        hasFailures = true;
       }
-
-      completed.push(await backupService.syncQueueItem(latest, token, options));
     }
 
     await backupQueueMetaStore.merge({

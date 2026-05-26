@@ -44,12 +44,20 @@ export const authService = {
       body: { email, otp, new_password },
     }),
 
-  sendFirstLoginOtp: (email, token) =>
-    apiRequest(ENDPOINTS.auth.sendFirstLoginOtp, {
+  sendFirstLoginOtp: (email, token) => {
+    console.log("[authService] sendFirstLoginOtp called with email:", email);
+    return apiRequest(ENDPOINTS.auth.sendFirstLoginOtp, {
       method: "POST",
       token,
       body: { email },
-    }),
+    }).then(response => {
+      console.log("[authService] sendFirstLoginOtp successful:", response);
+      return response;
+    }).catch(error => {
+      console.error("[authService] sendFirstLoginOtp failed:", error);
+      throw error;
+    });
+  },
 
   verifyFirstLoginOtp: ({ email, otp, new_password }, token) =>
     apiRequest(ENDPOINTS.auth.verifyFirstLoginOtp, {

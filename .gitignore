@@ -2,12 +2,14 @@
 
 # dependencies
 node_modules/
+.npm-cache/
 
 # Expo
 .expo/
 dist/
 web-build/
 expo-env.d.ts
+temp-export-check*/
 
 # Native
 .kotlin/
@@ -28,6 +30,21 @@ yarn-error.*
 
 # macOS
 .DS_Store
+
+# IDE
+.idea/
+
+# accidental command-output fragments
+/A
+/Configure
+/cs
+/Failed
+/Get
+/npx
+/Run
+/SDK
+/Task
+/Unit)
 *.pem
 
 # local env files

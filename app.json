@@ -1,7 +1,7 @@
 {
   "expo": {
-    "name": "Reatiler",
-    "slug": "Reatiler",
+    "name": "Family Media Hub",
+    "slug": "FamilyMediaHub",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -13,21 +13,42 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Family Media Hub scans your photos and videos for LAN backup.",
+        "UIBackgroundModes": [
+          "fetch",
+          "processing"
+        ]
+      }
     },
     "android": {
+      "permissions": [
+        "READ_MEDIA_IMAGES",
+        "READ_MEDIA_VIDEO",
+        "READ_EXTERNAL_STORAGE",
+        "ACCESS_MEDIA_LOCATION"
+      ],
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#ffffff"
       },
-      "edgeToEdgeEnabled": true
+      "edgeToEdgeEnabled": true,
+      "package": "com.pratap2.FamilyMediaHub"
     },
     "web": {
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
       "@react-native-community/datetimepicker",
-      "expo-video"
+      "expo-video",
+      [
+        "expo-media-library",
+        {
+          "photosPermission": "Family Media Hub needs access to photos and videos for LAN backup.",
+          "savePhotosPermission": "Family Media Hub may save restored media to your library."
+        }
+      ]
     ]
   }
 }

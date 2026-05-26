@@ -259,12 +259,14 @@ export const backupQueueStore = {
   init: async () => getStore(),
   createItem: (asset, defaults = {}) =>
     normalizeQueueItem({
+      id: defaults.id || asset.id,
       local_uri: asset.uri,
       file_name: asset.name || asset.fileName || `backup-${Date.now()}`,
       file_size: asset.size || asset.fileSize || 0,
       content_type: asset.mimeType || asset.type || "application/octet-stream",
       device_id: defaults.device_id,
       child_id: defaults.child_id,
+      status: defaults.status,
     }),
   getAll: async () => (await getStore()).getAll(),
   getActive: async () => (await getStore()).getActive(),

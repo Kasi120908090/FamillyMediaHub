@@ -373,12 +373,16 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
       activeUploadModeRef.current = "standard";
       setActiveUploadId(null);
       setActiveUploadMode("standard");
-      setActiveUploadFileName("");
+      // Keep filename visible briefly before clearing to avoid flickering
       setActiveUploadIndex(0);
       setActiveUploadTotal(0);
       setUploadProgress(0);
       setIsCancellingUpload(false);
       setIsUploadStarting(false);
+      // Clear filename after a short delay to prevent flickering
+      setTimeout(() => {
+        setActiveUploadFileName("");
+      }, 100);
     }
   };
 
@@ -618,9 +622,9 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
                 ]}
               />
             </View>
-            <Text style={styles.progressHint}>
-              {activeUploadTotal > 1
-                ? `Item ${activeUploadIndex} of ${activeUploadTotal}${activeUploadFileName ? ` - ${activeUploadFileName}` : ""}`
+            <Text style={styles.progressHint} numberOfLines={2}>
+              {activeUploadFileName
+                ? `${activeUploadTotal > 1 ? `Item ${activeUploadIndex} of ${activeUploadTotal} - ` : ""}${activeUploadFileName}`
                 : activeUploadMode === "chunked"
                 ? "Sending one chunk at a time to keep the app responsive."
                 : "Keeping your upload steady."}
@@ -954,6 +958,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
     fontWeight: "700",
     lineHeight: 14,
+    maxWidth: "100%",
   },
   uploadButton: {
     marginTop: 20,
