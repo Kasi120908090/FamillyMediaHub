@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useMemo } from "react";
 import {
   Modal,
   Pressable,
@@ -12,7 +12,7 @@ import { useNavigation } from "@react-navigation/native";
 import ThemedAvatar from "../common/ThemedAvatar";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
-import { isChildAccount } from "../../utils/auth";
+import { isChildAccount, isParentAdmin } from "../../utils/auth";
 
 const menuItems = [
   {
@@ -56,111 +56,42 @@ const menuItems = [
   },
 ];
 
-const getLoggedInChildId = (user) =>
-  user?.child_id ||
-  user?.childId ||
-  user?.child_profile_id ||
-  user?.childProfileId ||
-  user?.child?.id ||
-  user?.child_profile?.id ||
-  user?.childProfile?.id ||
-  user?.profile?.id ||
-  user?.id ||
-  null;
+const getProfileRelation = (user, selectedChild) =>
+  user?.relationship ||
+  user?.child?.relationship ||
+  user?.child_profile?.relationship ||
+  user?.childProfile?.relationship ||
+  user?.profile?.relationship ||
+  selectedChild?.relationship ||
+  selectedChild?.role ||
+  "Member";
 
 export default function MenuDrawer({ visible, onClose }) {
   const navigation = useNavigation();
   const {
-    children,
     currentUser,
     profile,
-    refreshChildren,
-    selectedChildId,
-    selectedParentView,
-    selectChild,
-    selectParentAccount,
-    viewerProfile,
+    selectedChild,
     logout,
   } = useProfile();
   const { theme } = useTheme();
-  const [accountsVisible, setAccountsVisible] = useState(false);
-
-  useEffect(() => {
-    if (visible && currentUser?.id) {
-      refreshChildren().catch(() => {});
-    }
-  }, [currentUser?.id, refreshChildren, visible]);
-
-  const accountOptions = useMemo(() => {
-    const childUser = isChildAccount(currentUser);
-    const loggedInChildId = childUser
-      ? getLoggedInChildId(currentUser)
-      : null;
-
-    const activeAccountKey = selectedParentView
-      ? "parent"
-      : selectedChildId
-      ? `child-${selectedChildId}`
-      : childUser && loggedInChildId
-      ? `child-${loggedInChildId}`
-      : "owner";
-
-    const loggedInAccount = {
-      id: "owner",
-      name: profile.name,
-      subtitle: childUser ? "Your account" : "Owner account",
-      image: profile.image,
-      isOwner: true,
-      isActive:
-        activeAccountKey === "owner" ||
-        (childUser &&
-          loggedInChildId &&
-          activeAccountKey === `child-${loggedInChildId}`),
-    };
-
-    if (childUser) {
-      return [loggedInAccount];
+  const profileSubtitle = useMemo(() => {
+    if (isParentAdmin(currentUser)) {
+      return "Owner";
     }
 
-    const childAccounts = children
-      .filter((child) => !loggedInChildId || String(child.id) !== String(loggedInChildId))
-      .map((child) => ({
-        id: child.id,
-        name: child.name || child.full_name || child.username || "Child",
-        subtitle: `${child.relationship || "Child account"} - View only`,
-        image: child.avatar_url || child.profile_image || child.image || "",
-        isOwner: false,
-        isActive: activeAccountKey === `child-${child.id}`,
-      }));
+    if (isChildAccount(currentUser)) {
+      return getProfileRelation(currentUser, selectedChild);
+    }
 
-    return [loggedInAccount, ...childAccounts];
-  }, [children, currentUser, profile, selectedChildId, selectedParentView]);
+    return "Member";
+  }, [currentUser, selectedChild]);
 
   const handleRoutePress = (route) => {
     onClose();
 
     if (route) {
       navigation.navigate(route);
-    }
-  };
-
-  const handleAccountPress = async (account) => {
-    try {
-      if (account.isOwner) {
-        if (isChildAccount(currentUser)) {
-          await selectChild(getLoggedInChildId(currentUser));
-        } else {
-          await selectChild(null);
-        }
-      } else if (account.isParentView) {
-        await selectParentAccount();
-      } else {
-        await selectChild(account.id);
-      }
-      onClose();
-      navigation.navigate("Gallery");
-    } catch (error) {
-      // Keep the drawer open so the user can retry or choose another profile.
     }
   };
 
@@ -185,56 +116,19 @@ export default function MenuDrawer({ visible, onClose }) {
 
           <TouchableOpacity
             style={styles.profileCard}
-            onPress={() => setAccountsVisible((current) => !current)}
+            onPress={() => handleRoutePress("Profile")}
+            activeOpacity={0.86}
           >
             <ThemedAvatar
-              uri={viewerProfile.image}
-              name={viewerProfile.name}
+              uri={profile.image}
+              name={profile.name}
               style={styles.profileImage}
             />
             <View style={styles.profileText}>
-              <Text style={[styles.profileName, { color: theme.text }]}>{viewerProfile.name}</Text>
-              <Text style={[styles.profileEmail, { color: theme.subText }]}>{viewerProfile.email}</Text>
+              <Text style={[styles.profileName, { color: theme.text }]}>{profile.name}</Text>
+              <Text style={[styles.profileEmail, { color: theme.subText }]}>{profileSubtitle}</Text>
             </View>
-            <Ionicons
-              name={accountsVisible ? "chevron-up" : "chevron-down"}
-              size={18}
-              color={theme.subText}
-            />
           </TouchableOpacity>
-
-          {accountsVisible ? (
-            <View style={styles.accountList}>
-              {accountOptions.map((account) => (
-                <TouchableOpacity
-                  key={String(account.id)}
-                  style={[
-                    styles.accountRow,
-                    { backgroundColor: account.isActive ? theme.iconBg : "transparent" },
-                  ]}
-                  onPress={() => handleAccountPress(account)}
-                  activeOpacity={0.86}
-                >
-                  <ThemedAvatar
-                    uri={account.image}
-                    name={account.name}
-                    style={styles.accountImage}
-                  />
-                  <View style={styles.menuText}>
-                    <Text style={[styles.accountName, { color: theme.text }]} numberOfLines={1}>
-                      {account.name}
-                    </Text>
-                    <Text style={[styles.menuSubtitle, { color: theme.subText }]}>
-                      {account.subtitle}
-                    </Text>
-                  </View>
-                  {account.isActive ? (
-                    <Ionicons name="checkmark-circle" size={18} color={theme.primary} />
-                  ) : null}
-                </TouchableOpacity>
-              ))}
-            </View>
-          ) : null}
 
           <View style={styles.menuGroup}>
             {menuItems.map((item) => (
