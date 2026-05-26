@@ -10,7 +10,9 @@ import {
   Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import ThemedAvatar from "../../components/common/ThemedAvatar";
 import { useAuth } from "../../hooks/useAuth";
+import { useProfile } from "../../context/ProfileContext";
 import { backupAutoSyncService } from "../../services/backupAutoSyncService";
 import { backupService } from "../../services/backupService";
 
@@ -50,6 +52,7 @@ const formatLastBackup = (value) => {
 
 export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
   const { currentUser, parentDevices } = useAuth();
+  const { viewerProfile } = useProfile();
   const [settings, setSettings] = useState(null);
   const [snapshot, setSnapshot] = useState({ items: [], meta: {}, storageType: "pending" });
   const [isScanning, setIsScanning] = useState(false);
@@ -279,94 +282,98 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
     : `Last backup: ${formatLastBackup(snapshot.meta?.last_autosync_at)}`;
 
   return (
-    <View style={styles.darkContainer}>
+    <View style={styles.container}>
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        <View style={styles.darkHeader}>
+        <View style={styles.header}>
           <TouchableOpacity
-            style={styles.darkHeaderButton}
+            style={styles.headerButton}
             onPress={() => (onOpenMenu ? onOpenMenu() : navigation.goBack())}
           >
-            <Ionicons name="chevron-back" size={24} color="#5B3FFF" />
+            <Ionicons name="menu" size={19} color="#5B3FFF" />
           </TouchableOpacity>
 
-          <Text style={styles.darkHeaderTitle}>Photo Backup</Text>
+          <View style={styles.brand}>
+            <View style={styles.logoBox}>
+              <Ionicons name="home" size={16} color="#fff" />
+            </View>
+            <Text style={styles.headerTitle}>Family Media Hub</Text>
+            <Ionicons name="add" size={16} color="#5B3FFF" />
+          </View>
 
-          <TouchableOpacity style={styles.darkHeaderButton} onPress={scanNow} disabled={isScanning || !deviceId}>
-            <Ionicons name={isScanning ? "sync" : "scan-outline"} size={22} color="#5B3FFF" />
-          </TouchableOpacity>
+          <View style={styles.headerRight}>
+            <TouchableOpacity style={styles.headerButton} onPress={() => navigation.navigate("Notifications")}>
+              <Ionicons name="notifications-outline" size={20} color="#5B3FFF" />
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => navigation.navigate("Profile")}>
+              <ThemedAvatar uri={viewerProfile.image} name={viewerProfile.name} style={styles.avatar} />
+            </TouchableOpacity>
+          </View>
         </View>
 
-        <View style={styles.darkToggleCard}>
-          <Text style={styles.darkToggleTitle}>Photo Backup</Text>
+        <Text style={styles.pageTitle}>Backup Settings</Text>
+
+        <View style={styles.introCard}>
+          <View style={styles.shieldIcon}>
+            <Ionicons name="shield" size={18} color="#FFFFFF" />
+          </View>
+          <View style={styles.flex}>
+            <Text style={styles.cardTitle}>{settings?.enabled ? "Auto sync enabled" : "Auto sync disabled"}</Text>
+            <Text style={styles.cardSub}>
+              Storage: {snapshot.storageType} - {snapshot.meta?.last_autosync_scan_count || 0} scanned
+            </Text>
+          </View>
           <Switch
             value={Boolean(settings?.enabled)}
             onValueChange={toggleAutoSync}
-            trackColor={{ false: "#27272A", true: "#0A84FF" }}
+            trackColor={{ false: "#E5E7EB", true: "#5B3FFF" }}
             thumbColor="#FFFFFF"
           />
         </View>
 
-        <View style={styles.darkBackupPanel}>
-          <View style={styles.connectionRow}>
-            <Ionicons name="phone-portrait-outline" size={44} color="#5B3FFF" />
-            <View style={styles.connectionLine} />
-            <Ionicons name={serverIconName(autoSyncRunning, snapshot.meta?.last_autosync_error)} size={18} color="#9CA3AF" />
-            <View style={styles.connectionLine} />
-            <Ionicons name="server-outline" size={42} color="#7377A0" />
+        <View style={styles.heroCard}>
+          <View style={styles.phoneMock}>
+            <View style={styles.phoneSpeaker} />
+            <Ionicons name="image" size={30} color="#5B3FFF" />
           </View>
-          <Text style={styles.connectionText}>
-            {settings?.enabled
-              ? "UniFi Endpoint and UNAS on the Same Network"
-              : "Photo Backup is currently turned off"}
-          </Text>
-
-          <View style={styles.darkMediaRow}>
-            <MediaSelectCard
-              icon="image"
-              title="Photo"
-              stats={backupStats.photo}
-              value={photos}
-              onPress={() => updateMediaType("photo", !photos)}
-            />
-            <MediaSelectCard
-              icon="film"
-              title="Video"
-              stats={backupStats.video}
-              value={videos}
-              onPress={() => updateMediaType("video", !videos)}
-            />
+          <View style={styles.signalWrap}>
+            <View style={styles.dottedLine} />
+            <Ionicons name="wifi" size={18} color="#5B3FFF" />
+            <View style={styles.dottedLine} />
           </View>
-
-          <Text style={styles.darkHelpText}>
-            Backs up automatically on the same network as NAS.
-            {"\n"}Stay in the app for faster backups.
-          </Text>
+          <View style={styles.driveMock}>
+            <View style={styles.checkBubble}>
+              <Ionicons name={autoSyncRunning ? "sync" : "checkmark"} size={16} color="#FFFFFF" />
+            </View>
+            <Ionicons name="home-outline" size={16} color="#64748B" />
+          </View>
         </View>
 
-        <Text style={styles.darkSectionTitle}>Destination</Text>
+        <Text style={styles.sectionTitle}>Backup by File Type</Text>
+        <Text style={styles.sectionSub}>Toggle on or off to choose what gets backed up automatically.</Text>
 
-        <TouchableOpacity style={styles.darkDestinationCard} onPress={() => navigation.navigate("BackupDashboard")}>
-          <Text style={styles.darkDestinationTitle}>Media</Text>
-          <Ionicons name="chevron-forward" size={22} color="#A1A1AA" />
-        </TouchableOpacity>
+        <MediaToggle
+          icon="image"
+          title="Photos"
+          stats={backupStats.photo}
+          value={photos}
+          onValueChange={(enabled) => updateMediaType("photo", enabled)}
+        />
+        <MediaToggle
+          icon="videocam"
+          title="Videos"
+          stats={backupStats.video}
+          value={videos}
+          onValueChange={(enabled) => updateMediaType("video", enabled)}
+        />
+        <MediaToggle
+          icon="document-text"
+          title="Files"
+          stats={backupStats.file}
+          value={files}
+          onValueChange={(enabled) => updateMediaType("file", enabled)}
+        />
 
-        <Text style={styles.darkDestinationSub}>
-          Backed-up items are saved in Media on Personal Drive.
-        </Text>
-
-        {files ? (
-          <TouchableOpacity style={styles.fileRowDark} onPress={() => updateMediaType("file", false)}>
-            <View style={styles.fileRowLeft}>
-              <Ionicons name="document-text" size={18} color="#0A84FF" />
-              <Text style={styles.fileRowText}>Files</Text>
-            </View>
-            <Text style={styles.fileRowMeta}>
-              {formatCount(backupStats.file.uploadedCount)}/{formatCount(backupStats.file.totalCount)}
-            </Text>
-          </TouchableOpacity>
-        ) : null}
-
-        <View style={styles.darkStatusCard}>
+        <View style={styles.statusCard}>
           <View style={styles.statusLeft}>
             <Ionicons
               name={snapshot.meta?.last_autosync_error ? "alert-circle" : "checkmark-circle"}
@@ -374,11 +381,16 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
               color={snapshot.meta?.last_autosync_error ? "#EF4444" : "#22C55E"}
             />
             <View style={styles.flex}>
-              <Text style={styles.darkStatusTitle}>{statusTitle}</Text>
-              <Text style={styles.darkStatusSub} numberOfLines={1}>
+              <Text style={styles.statusTitle}>{statusTitle}</Text>
+              <Text style={styles.statusSub} numberOfLines={1}>
                 {statusDetail}
               </Text>
             </View>
+          </View>
+
+          <View style={styles.autoBadge}>
+            <Ionicons name="sync" size={13} color="#5B3FFF" />
+            <Text style={styles.autoBadgeText}>Auto</Text>
           </View>
         </View>
 
@@ -391,11 +403,44 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
           </TouchableOpacity>
         )}
 
+        <TouchableOpacity
+          style={[styles.scanNowButton, isScanning && styles.scanNowButtonDisabled]}
+          onPress={scanNow}
+          disabled={isScanning || !deviceId}
+        >
+          <Ionicons name={isScanning ? "sync" : "search"} size={16} color="#FFFFFF" />
+          <Text style={styles.scanNowButtonText}>{isScanning ? "Scanning..." : "Scan Now"}</Text>
+        </TouchableOpacity>
+
         {scanMessage ? (
-          <View style={styles.darkScanMessageBox}>
-            <Text style={styles.darkScanMessageText}>{scanMessage}</Text>
+          <View style={styles.scanMessageBox}>
+            <Text style={styles.scanMessageText}>{scanMessage}</Text>
           </View>
         ) : null}
+
+        <Text style={styles.sectionTitle}>Destination</Text>
+
+        <TouchableOpacity style={styles.destinationCard} onPress={() => navigation.navigate("BackupDashboard")}>
+          <View style={styles.destinationLeft}>
+            <View style={styles.mediaIcon}>
+              <Ionicons name="folder" size={20} color="#5B3FFF" />
+            </View>
+            <View>
+              <Text style={styles.mediaTitle}>Media</Text>
+              <Text style={styles.mediaSub}>
+                {deviceId
+                  ? `${backupStats.queue.complete} complete, ${backupStats.queue.pending + backupStats.queue.uploading} pending`
+                  : "Auto registration pending"}
+              </Text>
+            </View>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color="#8A8F9E" />
+        </TouchableOpacity>
+
+        <View style={styles.footerLine}>
+          <Ionicons name="lock-closed-outline" size={13} color="#6B7280" />
+          <Text style={styles.footerText}>All selected items are saved in Media on your LAN backup server.</Text>
+        </View>
       </ScrollView>
 
     </View>
@@ -410,24 +455,26 @@ const serverIconName = (running, hasError) => {
   return running ? "sync" : "wifi-outline";
 };
 
-const MediaSelectCard = ({ icon, title, stats, value, onPress }) => (
-  <TouchableOpacity
-    style={[styles.darkMediaCard, value && styles.darkMediaCardActive]}
-    onPress={onPress}
-    activeOpacity={0.86}
-  >
-    <View style={styles.darkMediaCardTop}>
-      <Ionicons name={icon} size={32} color="#5B3FFF" />
-      <View style={[styles.darkCheckBox, value && styles.darkCheckBoxActive]}>
-        {value ? <Ionicons name="checkmark" size={18} color="#FFFFFF" /> : null}
+const MediaToggle = ({ icon, title, stats, value, onValueChange }) => (
+  <View style={styles.mediaCard}>
+    <View style={styles.mediaLeft}>
+      <View style={styles.mediaIcon}>
+        <Ionicons name={icon} size={20} color="#5B3FFF" />
+      </View>
+      <View>
+        <Text style={styles.mediaTitle}>{title}</Text>
+        <Text style={styles.mediaSub}>
+          {formatCount(stats.uploadedCount)}/{formatCount(stats.totalCount)} backed up - {bytesToGb(stats.bytes)}
+        </Text>
       </View>
     </View>
-    <Text style={styles.darkMediaTitle}>{title}</Text>
-    <Text style={styles.darkMediaCount}>
-      {formatCount(stats.uploadedCount)}/{formatCount(stats.totalCount)}
-    </Text>
-    <Text style={styles.darkMediaBytes}>({bytesToGb(stats.bytes)})</Text>
-  </TouchableOpacity>
+    <Switch
+      value={value}
+      onValueChange={onValueChange}
+      trackColor={{ false: "#E5E7EB", true: "#5B3FFF" }}
+      thumbColor="#FFFFFF"
+    />
+  </View>
 );
 
 const styles = StyleSheet.create({

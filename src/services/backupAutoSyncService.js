@@ -582,6 +582,16 @@ export const backupAutoSyncService = {
     };
   },
 
+  requestPermission: async () => {
+    const result = await ensureMediaLibraryPermissions();
+    return {
+      granted: result.granted,
+      alreadyGranted: result.alreadyGranted,
+      permanent: result.permanent,
+      message: result.message,
+    };
+  },
+
   /**
    * Diagnostic function to check what media is on the device
    * Useful for debugging why photos/videos aren't being scanned
