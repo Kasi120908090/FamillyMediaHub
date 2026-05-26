@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   FlatList,
+  InteractionManager,
   Modal,
   Platform,
   StyleSheet,
@@ -107,10 +108,20 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
   const [isGridView, setIsGridView] = useState(true);
   const [isDateReversed, setIsDateReversed] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [sceneReady, setSceneReady] = useState(false);
+
+  useEffect(() => {
+    setSceneReady(false);
+    const task = InteractionManager.runAfterInteractions(() => {
+      setSceneReady(true);
+    });
+
+    return () => task.cancel();
+  }, []);
 
   const files = useMemo(
     () =>
-      mediaItems
+      (sceneReady ? mediaItems : [])
         .filter(
           (item) => {
             if (!isChildAccount || !selectedChildId) {
@@ -144,7 +155,7 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
             ? getItemDate(firstItem) - getItemDate(secondItem)
             : getItemDate(secondItem) - getItemDate(firstItem)
         ),
-    [endDate, isChildAccount, mediaItems, searchQuery, selectedChildId, startDate, isDateReversed]
+    [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]
   );
 
   const hasActiveFilters = Boolean(startDate || endDate || isGridView || isDateReversed);
@@ -261,6 +272,7 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
         contentContainerStyle={styles.listContent}
         renderItem={renderFileItem}
         ListEmptyComponent={
+          !sceneReady ? null :
           <View style={[styles.emptyState, { backgroundColor: theme.card }]}>
             <Text style={[styles.emptyTitle, { color: theme.text }]}>No files available</Text>
             <Text style={[styles.emptySubtitle, { color: theme.subText }]}>

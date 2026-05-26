@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Image,
+  InteractionManager,
   ScrollView,
   StyleSheet,
   Text,
@@ -95,12 +96,27 @@ export default function BackupDashboardScreen({ navigation, onOpenMenu }) {
   }, [authToken]);
 
   useEffect(() => {
-    refreshBackupState().catch(() => {});
-    const intervalId = setInterval(() => {
-      refreshBackupState().catch(() => {});
-    }, 5000);
+    let isCancelled = false;
+    let intervalId;
 
-    return () => clearInterval(intervalId);
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (isCancelled) {
+        return;
+      }
+
+      refreshBackupState().catch(() => {});
+      intervalId = setInterval(() => {
+        refreshBackupState().catch(() => {});
+      }, 5000);
+    });
+
+    return () => {
+      isCancelled = true;
+      task.cancel();
+      if (intervalId) {
+        clearInterval(intervalId);
+      }
+    };
   }, [refreshBackupState]);
 
   const unifiedItems = useMemo(() => {
@@ -225,28 +241,28 @@ export default function BackupDashboardScreen({ navigation, onOpenMenu }) {
             title="Photos"
             count={stats.photo.count}
             bytes={stats.photo.bytes}
-            onPress={() => navigation.navigate("Images", { initialItems: unifiedItems.filter(i => getFileKind(i) === 'photo'), title: 'Backed up Photos' })}
+            onPress={() => navigation.navigate("Images")}
           />
           <CategoryTile
             icon="videocam-outline"
             title="Videos"
             count={stats.video.count}
             bytes={stats.video.bytes}
-            onPress={() => navigation.navigate("Videos", { initialItems: unifiedItems.filter(i => getFileKind(i) === 'video'), title: 'Backed up Videos' })}
+            onPress={() => navigation.navigate("Videos")}
           />
           <CategoryTile
             icon="document-text-outline"
             title="Files"
             count={stats.file.count}
             bytes={stats.file.bytes}
-            onPress={() => navigation.navigate("Files", { initialItems: unifiedItems.filter(i => getFileKind(i) === 'file'), title: 'Backed up Files' })}
+            onPress={() => navigation.navigate("Files")}
           />
         </View>
 
         <SectionHeader
           title="Recent Items"
           action="View All"
-          onActionPress={() => navigation.navigate("Gallery", { initialItems: unifiedItems, title: 'All Backups' })}
+          onActionPress={() => navigation.navigate("Gallery")}
         />
         {recentItems.length ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recentList}>

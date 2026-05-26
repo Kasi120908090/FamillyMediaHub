@@ -5,6 +5,7 @@ import {
   BackHandler,
   FlatList,
   Image,
+  InteractionManager,
   Platform,
   StyleSheet,
   Text,
@@ -162,17 +163,29 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
   const [showVideoCover, setShowVideoCover] = useState(false);
   const [isMediaLoading, setIsMediaLoading] = useState(false);
   const [mediaLoadError, setMediaLoadError] = useState("");
+  const [sceneReady, setSceneReady] = useState(false);
+
+  useEffect(() => {
+    setSceneReady(false);
+    const task = InteractionManager.runAfterInteractions(() => {
+      setSceneReady(true);
+    });
+
+    return () => task.cancel();
+  }, []);
 
   const scopedMediaItems = useMemo(() => {
+    const sourceMediaItems = sceneReady ? mediaItems : [];
+
     if (!isChildAccount || !selectedChildId) {
-      return mediaItems;
+      return sourceMediaItems;
     }
 
-    return mediaItems.filter((item) => {
+    return sourceMediaItems.filter((item) => {
       const itemChildId = getMediaChildId(item);
       return itemChildId !== null && String(itemChildId) === String(selectedChildId);
     });
-  }, [isChildAccount, mediaItems, selectedChildId]);
+  }, [isChildAccount, mediaItems, sceneReady, selectedChildId]);
 
   const filteredMediaItems = useMemo(
     () =>
@@ -271,27 +284,33 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
     useCallback(() => {
       let isActive = true;
 
-      const hydrateMedia = async () => {
-        setIsMediaLoading(true);
-        setMediaLoadError("");
-
-        try {
-          await loadChildMedia(isChildAccount ? selectedChildId : null);
-        } catch (error) {
-          if (isActive) {
-            setMediaLoadError(error.message || "Unable to load media right now.");
+      const hydrateMedia = () =>
+        InteractionManager.runAfterInteractions(async () => {
+          if (!isActive) {
+            return;
           }
-        } finally {
-          if (isActive) {
-            setIsMediaLoading(false);
-          }
-        }
-      };
 
-      hydrateMedia();
+          setIsMediaLoading(true);
+          setMediaLoadError("");
+
+          try {
+            await loadChildMedia(isChildAccount ? selectedChildId : null);
+          } catch (error) {
+            if (isActive) {
+              setMediaLoadError(error.message || "Unable to load media right now.");
+            }
+          } finally {
+            if (isActive) {
+              setIsMediaLoading(false);
+            }
+          }
+        });
+
+      const task = hydrateMedia();
 
       return () => {
         isActive = false;
+        task?.cancel?.();
       };
     }, [isChildAccount, loadChildMedia, selectedChildId])
   );
@@ -599,7 +618,7 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
           </FadeInView>
         )}
         ListEmptyComponent={
-          isMediaLoading ? (
+          !sceneReady || isMediaLoading ? (
             <View style={[styles.emptyState, { backgroundColor: theme.card }]}>
               <ActivityIndicator size="large" color={theme.primary} />
               <Text style={[styles.emptyTitle, { color: theme.text }]}>Loading your media</Text>

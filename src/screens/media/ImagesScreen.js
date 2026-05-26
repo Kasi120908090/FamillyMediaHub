@@ -1,7 +1,8 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import {
   FlatList,
   Image,
+  InteractionManager,
   Modal,
   Platform,
   StyleSheet,
@@ -120,10 +121,20 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
   const [isDateReversed, setIsDateReversed] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
+  const [sceneReady, setSceneReady] = useState(false);
+
+  useEffect(() => {
+    setSceneReady(false);
+    const task = InteractionManager.runAfterInteractions(() => {
+      setSceneReady(true);
+    });
+
+    return () => task.cancel();
+  }, []);
 
   const images = useMemo(
     () =>
-      mediaItems
+      (sceneReady ? mediaItems : [])
         .filter(
           (item) => {
             if (!isChildAccount || !selectedChildId) {
@@ -153,7 +164,7 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
             ? getItemDate(firstItem) - getItemDate(secondItem)
             : getItemDate(secondItem) - getItemDate(firstItem)
         ),
-    [endDate, isChildAccount, mediaItems, searchQuery, selectedChildId, startDate, isDateReversed]
+    [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]
   );
 
   const groupedImages = useMemo(() => {
@@ -329,6 +340,7 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
           </FadeInView>
         )}
         ListEmptyComponent={
+          !sceneReady ? null :
           <View style={[styles.emptyState, { backgroundColor: theme.card, borderColor: theme.border }]}>
             <View style={[styles.emptyIcon, { backgroundColor: theme.iconBg }]}>
               <Ionicons name="image-outline" size={42} color={theme.primary} />

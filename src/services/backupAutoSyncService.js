@@ -107,6 +107,55 @@ const normalizeMediaType = (mediaType) => {
   return null;
 };
 
+const getMediaLibraryTypeValue = (type) => {
+  if (type === "photo") {
+    return MediaLibrary.MediaType?.photo;
+  }
+
+  if (type === "video") {
+    return MediaLibrary.MediaType?.video;
+  }
+
+  if (type === "audio") {
+    return MediaLibrary.MediaType?.audio;
+  }
+
+  return null;
+};
+
+const getDeviceMediaCounts = async () => {
+  const counts = {
+    photo: 0,
+    video: 0,
+    audio: 0,
+  };
+
+  if (!MediaLibrary?.getAssetsAsync) {
+    return counts;
+  }
+
+  for (const type of Object.keys(counts)) {
+    const mediaType = getMediaLibraryTypeValue(type);
+
+    if (!mediaType) {
+      continue;
+    }
+
+    try {
+      const response = await MediaLibrary.getAssetsAsync({
+        first: 1,
+        mediaType: [mediaType],
+      });
+
+      counts[type] = Number(response?.totalCount || response?.assets?.length || 0);
+    } catch (error) {
+      counts[type] = 0;
+    }
+  }
+
+  return counts;
+};
+
 const scanMediaAssets = async (settings) => {
   if (!MediaLibrary?.getAssetsAsync) {
     return {
@@ -127,6 +176,7 @@ const scanMediaAssets = async (settings) => {
   const selectedMediaTypes = (settings.mediaTypes || DEFAULT_AUTO_SYNC_SETTINGS.mediaTypes)
     .map(normalizeMediaType)
     .filter(Boolean);
+  const deviceCounts = await getDeviceMediaCounts();
   
   // Diagnostic logging
   console.log("[BackupScan] Selected media types:", selectedMediaTypes);
@@ -134,14 +184,14 @@ const scanMediaAssets = async (settings) => {
   
   // Map to correct MediaLibrary enum values
   let mediaTypeFilters = [];
-  if (selectedMediaTypes.includes("photo") && MediaLibrary.MediaType?.photo) {
-    mediaTypeFilters.push(MediaLibrary.MediaType.photo);
+  if (selectedMediaTypes.includes("photo") && getMediaLibraryTypeValue("photo")) {
+    mediaTypeFilters.push(getMediaLibraryTypeValue("photo"));
   }
-  if (selectedMediaTypes.includes("video") && MediaLibrary.MediaType?.video) {
-    mediaTypeFilters.push(MediaLibrary.MediaType.video);
+  if (selectedMediaTypes.includes("video") && getMediaLibraryTypeValue("video")) {
+    mediaTypeFilters.push(getMediaLibraryTypeValue("video"));
   }
-  if (selectedMediaTypes.includes("audio") && MediaLibrary.MediaType?.audio) {
-    mediaTypeFilters.push(MediaLibrary.MediaType.audio);
+  if (selectedMediaTypes.includes("audio") && getMediaLibraryTypeValue("audio")) {
+    mediaTypeFilters.push(getMediaLibraryTypeValue("audio"));
   }
 
   // If no valid media types found, fall back to just scanning with no filter
@@ -252,7 +302,7 @@ const scanMediaAssets = async (settings) => {
   }
 
   console.log("[BackupScan] Final assets after filtering:", assets.length);
-  return { assets, discoveredCount: discovered.length, skipped };
+  return { assets, discoveredCount: discovered.length, skipped, deviceCounts };
 };
 
 const mergeSettings = (settings) => ({
@@ -353,8 +403,10 @@ export const backupAutoSyncService = {
       last_autosync_enqueue_count: queued.length,
       last_autosync_photo_count: typeStats.photo.count,
       last_autosync_photo_bytes: typeStats.photo.bytes,
+      last_autosync_photo_device_count: scanResult.deviceCounts?.photo || typeStats.photo.count,
       last_autosync_video_count: typeStats.video.count,
       last_autosync_video_bytes: typeStats.video.bytes,
+      last_autosync_video_device_count: scanResult.deviceCounts?.video || typeStats.video.count,
       last_autosync_file_count: typeStats.file.count,
       last_autosync_file_bytes: typeStats.file.bytes,
       last_autosync_scan_error: "",
@@ -485,8 +537,10 @@ export const backupAutoSyncService = {
         last_autosync_enqueue_count: queued.length,
         last_autosync_photo_count: typeStats.photo.count,
         last_autosync_photo_bytes: typeStats.photo.bytes,
+        last_autosync_photo_device_count: scanResult.deviceCounts?.photo || typeStats.photo.count,
         last_autosync_video_count: typeStats.video.count,
         last_autosync_video_bytes: typeStats.video.bytes,
+        last_autosync_video_device_count: scanResult.deviceCounts?.video || typeStats.video.count,
         last_autosync_file_count: typeStats.file.count,
         last_autosync_file_bytes: typeStats.file.bytes,
         last_autosync_scan_error: "",

@@ -3,6 +3,7 @@ import {
   Alert,
   FlatList,
   Image,
+  InteractionManager,
   Modal,
   Platform,
   StyleSheet,
@@ -124,10 +125,20 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
   const [currentVideo, setCurrentVideo] = useState(null);
   const [hasVideoFirstFrame, setHasVideoFirstFrame] = useState(false);
   const [showVideoCover, setShowVideoCover] = useState(false);
+  const [sceneReady, setSceneReady] = useState(false);
+
+  useEffect(() => {
+    setSceneReady(false);
+    const task = InteractionManager.runAfterInteractions(() => {
+      setSceneReady(true);
+    });
+
+    return () => task.cancel();
+  }, []);
 
   const videos = useMemo(
     () =>
-      mediaItems
+      (sceneReady ? mediaItems : [])
         .filter(
           (item) => {
             if (!isChildAccount || !selectedChildId) {
@@ -157,7 +168,7 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
             ? getItemDate(firstItem) - getItemDate(secondItem)
             : getItemDate(secondItem) - getItemDate(firstItem)
         ),
-    [endDate, isChildAccount, mediaItems, searchQuery, selectedChildId, startDate, isDateReversed]
+    [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]
   );
 
   const groupedVideos = useMemo(() => {
@@ -382,6 +393,7 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
         removeClippedSubviews
         renderItem={renderVideoSection}
         ListEmptyComponent={
+          !sceneReady ? null :
           <View style={[styles.emptyState, { backgroundColor: theme.card }]}>
             <Text style={[styles.emptyTitle, { color: theme.text }]}>No videos available</Text>
             <Text style={[styles.emptySubtitle, { color: theme.subText }]}>
