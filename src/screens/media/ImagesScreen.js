@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import {
   FlatList,
-  Image,
   InteractionManager,
   Modal,
   Platform,
@@ -15,6 +14,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import ThemedAvatar from "../../components/common/ThemedAvatar";
 import AppHeader from "../../components/navigation/AppHeader";
+import CachedImage from "../../components/media/CachedImage";
 import ImageViewer from "../../components/media/ImageViewer";
 import {
   FadeInView,
@@ -310,13 +310,13 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
                   >
                     {isGridView ? (
                       <>
-                        <Image source={{ uri: getImageUri(item) }} style={styles.tileImage} />
+                        <CachedImage source={{ uri: getImageUri(item) }} style={styles.tileImage} />
                         <View style={styles.tileShade} />
                         <MediaBadge icon="image-outline"></MediaBadge>
                       </>
                     ) : (
                       <View style={styles.listTileContent}>
-                        <Image source={{ uri: getImageUri(item) }} style={styles.listTileImage} />
+                        <CachedImage source={{ uri: getImageUri(item) }} style={styles.listTileImage} />
                         <View style={styles.listTileText}>
                           <Text style={[styles.listTileTitle, { color: theme.text }]} numberOfLines={1}>
                             {item.original_file_name || item.stored_file_name || "Photo"}

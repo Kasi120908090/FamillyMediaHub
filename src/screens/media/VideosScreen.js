@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   FlatList,
-  Image,
   InteractionManager,
   Modal,
   Platform,
@@ -16,6 +15,7 @@ import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import ThemedAvatar from "../../components/common/ThemedAvatar";
 import AppHeader from "../../components/navigation/AppHeader";
+import CachedImage from "../../components/media/CachedImage";
 import VideoPlayer from "../../components/media/VideoPlayer";
 import VideoThumbnail from "../../components/media/VideoThumbnail";
 import ZoomableMedia from "../../components/media/ZoomableMedia";
@@ -560,7 +560,7 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
               </ZoomableMedia>
               {showVideoCover && !hasVideoFirstFrame && currentVideoThumbnailUri ? (
                 <View style={styles.videoLoadingCover} pointerEvents="none">
-                  <Image
+                  <CachedImage
                     source={{ uri: currentVideoThumbnailUri }}
                     style={styles.fullScreenVideo}
                     resizeMode="contain"

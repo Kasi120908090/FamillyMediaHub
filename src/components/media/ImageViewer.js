@@ -3,7 +3,6 @@ import {
   Alert,
   Dimensions,
   FlatList,
-  Image,
   Modal,
   Platform,
   Share,
@@ -13,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import CachedImage from "./CachedImage";
 import ZoomableMedia from "./ZoomableMedia";
 
 const { width, height } = Dimensions.get("window");
@@ -190,7 +190,7 @@ export default function ImageViewer({
                 resetKey={getImageKey(item, index)}
                 onZoomChange={(scale) => setIsZoomed(scale > 1)}
               >
-                <Image
+                <CachedImage
                   source={{ uri: getImageUri(item) }}
                   style={styles.image}
                   resizeMode="contain"

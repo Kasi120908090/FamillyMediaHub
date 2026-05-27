@@ -1,4 +1,7 @@
-import { API_BASE_URL } from "../config/env";
+import {
+  getActiveBackendBaseUrl,
+  getCurrentBackendBaseUrl,
+} from "./backendDiscoveryService";
 
 const defaultJsonHeaders = {
   Accept: "application/json",
@@ -67,6 +70,12 @@ async function parseResponse(response) {
 
 export async function apiRequest(endpoint, options = {}) {
   const { token, body, rawBody, headers, ...restOptions } = options;
+  const apiBaseUrl = await getActiveBackendBaseUrl();
+
+  if (!apiBaseUrl) {
+    throw new Error("Backend not found on this Wi-Fi");
+  }
+
   const requestHeaders = {
     ...defaultJsonHeaders,
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -92,7 +101,7 @@ export async function apiRequest(endpoint, options = {}) {
   }
 
   try {
-    const response = await fetch(`${API_BASE_URL}${endpoint}`, requestOptions);
+    const response = await fetch(`${apiBaseUrl}${endpoint}`, requestOptions);
     return parseResponse(response);
   } catch (error) {
     if (error?.name === "AbortError") {
@@ -101,7 +110,7 @@ export async function apiRequest(endpoint, options = {}) {
 
     if (error?.message === "Network request failed" || error instanceof TypeError) {
       throw new Error(
-        `Unable to reach the server at ${API_BASE_URL}. Check that the backend is running and your phone is on the same Wi-Fi/network.`
+        `Unable to reach the server at ${apiBaseUrl}. Check that the backend is running and your phone is on the same Wi-Fi/network.`
       );
     }
 
@@ -127,5 +136,11 @@ export function resolveMediaUri(filePath) {
     return encodeURI(normalizedPath);
   }
 
-  return encodeURI(`${API_BASE_URL}/${normalizedPath.replace(/^\/+/, "")}`);
+  const apiBaseUrl = getCurrentBackendBaseUrl();
+
+  if (!apiBaseUrl) {
+    return null;
+  }
+
+  return encodeURI(`${apiBaseUrl}/${normalizedPath.replace(/^\/+/, "")}`);
 }

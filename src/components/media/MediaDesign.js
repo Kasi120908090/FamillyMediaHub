@@ -2,7 +2,6 @@ import React, { memo, useEffect, useRef } from "react";
 import {
   Animated,
   Easing,
-  Image,
   Pressable,
   StyleSheet,
   Text,
@@ -11,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
+import CachedImage from "./CachedImage";
 
 export const ui = {
   bg: "#FBFAFF",
@@ -215,7 +215,7 @@ export const FileChip = memo(({ name, type, size, compact = false }) => {
 
 export const ImageTile = memo(({ uri, style, onPress, title, meta, children }) => (
   <Pressable style={[sharedStyles.imageTile, softShadow, style]} onPress={onPress}>
-    <Image source={{ uri }} style={sharedStyles.tileImage} resizeMode="cover" />
+    <CachedImage source={{ uri }} style={sharedStyles.tileImage} resizeMode="cover" />
     <View style={sharedStyles.tileShade} />
     {title ? (
       <View style={sharedStyles.tileText}>

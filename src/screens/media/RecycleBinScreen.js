@@ -1,7 +1,6 @@
 import React, { useMemo } from "react";
 import {
   FlatList,
-  Image,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -10,6 +9,7 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import ThemedAvatar from "../../components/common/ThemedAvatar";
 import AppHeader from "../../components/navigation/AppHeader";
+import CachedImage from "../../components/media/CachedImage";
 import VideoThumbnail from "../../components/media/VideoThumbnail";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
@@ -72,7 +72,7 @@ export default function RecycleBinScreen({ navigation, onOpenMenu }) {
     const category = getNormalizedCategory(item);
 
     if (category === "image") {
-      return <Image source={{ uri: getMediaUri(item) }} style={styles.preview} />;
+      return <CachedImage source={{ uri: getMediaUri(item) }} style={styles.preview} />;
     }
 
     if (category === "video") {

@@ -1,10 +1,61 @@
 import * as FileSystem from "expo-file-system/legacy";
 import { ENDPOINTS } from "../config/endpoints";
 import { apiRequest } from "./api";
+import { getCurrentBackendBaseUrl } from "./backendDiscoveryService";
 import { Sha256, base64ToBytes, sha256Bytes } from "../utils/sha256";
 
 const LARGE_VIDEO_LIMIT = 100 * 1024 * 1024;
 const VIDEO_CHUNK_SIZE = 8 * 1024 * 1024;
+const MEDIA_LIST_CACHE_TTL = 60 * 1000;
+const mediaListCache = new Map();
+const pendingMediaLists = new Map();
+
+const hashString = (value) => {
+  let hash = 5381;
+
+  for (let index = 0; index < value.length; index += 1) {
+    hash = (hash * 33) ^ value.charCodeAt(index);
+  }
+
+  return (hash >>> 0).toString(16);
+};
+
+const getMediaListCacheKey = (token, scope, params) =>
+  `${getCurrentBackendBaseUrl() || "no-backend"}:${hashString(token || "guest")}:${scope}:${JSON.stringify(
+    params || {}
+  )}`;
+
+const requestCachedMediaList = (cacheKey, endpoint, options) => {
+  const cached = mediaListCache.get(cacheKey);
+
+  if (cached && Date.now() - cached.createdAt < MEDIA_LIST_CACHE_TTL) {
+    return Promise.resolve(cached.value);
+  }
+
+  if (pendingMediaLists.has(cacheKey)) {
+    return pendingMediaLists.get(cacheKey);
+  }
+
+  const requestPromise = apiRequest(endpoint, options)
+    .then((value) => {
+      mediaListCache.set(cacheKey, {
+        createdAt: Date.now(),
+        value,
+      });
+      return value;
+    })
+    .finally(() => {
+      pendingMediaLists.delete(cacheKey);
+    });
+
+  pendingMediaLists.set(cacheKey, requestPromise);
+  return requestPromise;
+};
+
+const clearMediaListCache = () => {
+  mediaListCache.clear();
+  pendingMediaLists.clear();
+};
 
 const isLargeVideoUpload = (payload) =>
   payload?.category === "video" &&
@@ -133,6 +184,8 @@ const uploadChunkedVideo = async (payload, token, options = {}) => {
     signal: options.signal,
   });
 
+  clearMediaListCache();
+
   options.onProgress?.({
     mode: "chunked",
     uploadId,
@@ -148,19 +201,31 @@ const uploadChunkedVideo = async (payload, token, options = {}) => {
 
 export const mediaService = {
   listMediaForParent: (token, category) =>
-    apiRequest(ENDPOINTS.media.listForParent(category), {
-      token,
-    }),
+    requestCachedMediaList(
+      getMediaListCacheKey(token, "parent", { category }),
+      ENDPOINTS.media.listForParent(category),
+      {
+        token,
+      }
+    ),
 
   listMediaForChild: (childId, token, category) =>
-    apiRequest(ENDPOINTS.media.listForChild(childId, category), {
-      token,
-    }),
+    requestCachedMediaList(
+      getMediaListCacheKey(token, "child", { childId, category }),
+      ENDPOINTS.media.listForChild(childId, category),
+      {
+        token,
+      }
+    ),
 
   listMediaForDevice: (deviceId, token, filters) =>
-    apiRequest(ENDPOINTS.media.listForDevice(deviceId, filters), {
-      token,
-    }),
+    requestCachedMediaList(
+      getMediaListCacheKey(token, "device", { deviceId, filters }),
+      ENDPOINTS.media.listForDevice(deviceId, filters),
+      {
+        token,
+      }
+    ),
 
   uploadMedia: (payload, token, options = {}) => {
     if (isLargeVideoUpload(payload)) {
@@ -215,6 +280,7 @@ export const mediaService = {
       body: formData,
       signal: options.signal,
     }).then((response) => {
+      clearMediaListCache();
       options.onProgress?.({
         mode: "standard",
         progress: 1,

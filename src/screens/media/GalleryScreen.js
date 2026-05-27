@@ -4,7 +4,6 @@ import {
   Alert,
   BackHandler,
   FlatList,
-  Image,
   InteractionManager,
   Platform,
   StyleSheet,
@@ -20,6 +19,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
 import ThemedAvatar from "../../components/common/ThemedAvatar";
 import AppHeader from "../../components/navigation/AppHeader";
+import CachedImage from "../../components/media/CachedImage";
 import ImageViewer from "../../components/media/ImageViewer";
 import VideoPlayer from "../../components/media/VideoPlayer"; // Assuming this path based on VideosScreen.js
 import VideoThumbnail from "../../components/media/VideoThumbnail";
@@ -543,7 +543,7 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
                   >
                     <View style={styles.mediaTileContent}>
                       {getNormalizedCategory(item) === "images" && (
-                        <Image source={{ uri: getMediaUri(item) }} style={styles.mediaPreview} />
+                        <CachedImage source={{ uri: getMediaUri(item) }} style={styles.mediaPreview} />
                       )}
                       {getNormalizedCategory(item) === "videos" && (
                         <>
@@ -591,7 +591,7 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
                     >
                       <View style={styles.mediaListPreview}>
                         {category === "images" && (
-                          <Image source={{ uri: getMediaUri(item) }} style={styles.mediaPreview} />
+                          <CachedImage source={{ uri: getMediaUri(item) }} style={styles.mediaPreview} />
                         )}
                         {category === "videos" && (
                           <VideoThumbnail item={item} style={styles.mediaPreview} />
@@ -695,7 +695,7 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
               </ZoomableMedia>
               {showVideoCover && !hasVideoFirstFrame && currentVideoThumbnailUri ? (
                 <View style={styles.videoLoadingCover} pointerEvents="none">
-                  <Image
+                  <CachedImage
                     source={{ uri: currentVideoThumbnailUri }}
                     style={styles.fullScreenVideo}
                     resizeMode="contain"
