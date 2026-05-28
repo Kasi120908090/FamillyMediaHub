@@ -9,8 +9,8 @@ const STORAGE_KEYS = {
 const BACKEND_PORT = 8000;
 const HEALTH_PATH = "/health";
 const EXPECTED_SERVICE = "my-backend";
-const REQUEST_TIMEOUT_MS = 1000;
-const SCAN_BATCH_SIZE = 64;
+const REQUEST_TIMEOUT_MS = 1500;
+const SCAN_BATCH_SIZE = 16;
 
 let activeBaseUrl = null;
 let activeSubnet = null;
@@ -71,14 +71,20 @@ const getSubnetPrefix = (ipAddress) => {
 const fetchJsonWithTimeout = async (url, timeoutMs = REQUEST_TIMEOUT_MS) => {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  const timeoutPromise = new Promise((resolve) => {
+    setTimeout(() => resolve(null), timeoutMs + 100);
+  });
 
   try {
-    const response = await fetch(url, {
-      method: "GET",
-      signal: controller.signal,
-    });
+    const response = await Promise.race([
+      fetch(url, {
+        method: "GET",
+        signal: controller.signal,
+      }),
+      timeoutPromise,
+    ]);
 
-    if (!response.ok) {
+    if (!response?.ok) {
       return null;
     }
 
@@ -104,7 +110,7 @@ const scanSubnet = async (subnetPrefix, onProgress) => {
   for (let index = 0; index < candidates.length; index += SCAN_BATCH_SIZE) {
     const batch = candidates.slice(index, index + SCAN_BATCH_SIZE);
     onProgress?.({
-      checked: index,
+      checked: Math.min(index + batch.length, candidates.length),
       total: candidates.length,
       subnet: subnetPrefix,
     });

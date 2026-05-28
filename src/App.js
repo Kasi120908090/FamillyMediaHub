@@ -1,5 +1,11 @@
 import React from "react";
-import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from "react-native";
+import {
+  ActivityIndicator,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from "react-native";
 import {
   DarkTheme,
   DefaultTheme,
@@ -52,6 +58,7 @@ function BackendGate({ children }) {
   const [status, setStatus] = React.useState("scanning");
   const [message, setMessage] = React.useState("Scanning this Wi-Fi for backend...");
   const [progress, setProgress] = React.useState({ checked: 0, total: 254 });
+  const [networkDetails, setNetworkDetails] = React.useState({ ipAddress: "", subnet: "" });
 
   const runDiscovery = React.useCallback(async () => {
     setStatus("scanning");
@@ -71,6 +78,11 @@ function BackendGate({ children }) {
         setStatus("not-found");
         setMessage(result.message || "Backend not found on this Wi-Fi");
       }
+
+      setNetworkDetails({
+        ipAddress: result.ipAddress || "",
+        subnet: result.subnet || "",
+      });
     } catch {
       setStatus("not-found");
       setMessage("Backend not found on this Wi-Fi");
@@ -89,6 +101,11 @@ function BackendGate({ children }) {
           setStatus("not-found");
           setMessage("Backend not found on this Wi-Fi");
         }
+
+        setNetworkDetails({
+          ipAddress: result?.ipAddress || "",
+          subnet: result?.subnet || "",
+        });
       },
       () => {
         setStatus("scanning");
@@ -121,6 +138,12 @@ function BackendGate({ children }) {
               }`
             : message}
         </Text>
+        {networkDetails.ipAddress || progress.subnet ? (
+          <Text style={styles.backendDetails}>
+            Phone IP: {networkDetails.ipAddress || "checking..."}{"\n"}
+            Scanning: {networkDetails.subnet || progress.subnet || "checking..."}.1-254:8000
+          </Text>
+        ) : null}
         {status === "not-found" ? (
           <TouchableOpacity style={styles.retryButton} onPress={runDiscovery} activeOpacity={0.85}>
             <Text style={styles.retryButtonText}>Scan Again</Text>
@@ -181,8 +204,14 @@ const styles = StyleSheet.create({
     lineHeight: 19,
     textAlign: "center",
   },
+  backendDetails: {
+    marginTop: 10,
+    color: "#5F5488",
+    fontSize: 12,
+    lineHeight: 18,
+    textAlign: "center",
+  },
   retryButton: {
-    marginTop: 18,
     minHeight: 44,
     borderRadius: 12,
     paddingHorizontal: 18,
