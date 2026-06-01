@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { memo, useCallback, useMemo } from "react";
 import {
   Modal,
   Pressable,
@@ -66,7 +66,7 @@ const getProfileRelation = (user, selectedChild) =>
   selectedChild?.role ||
   "Member";
 
-export default function MenuDrawer({ visible, onClose }) {
+function MenuDrawer({ visible, onClose }) {
   const navigation = useNavigation();
   const {
     currentUser,
@@ -87,13 +87,30 @@ export default function MenuDrawer({ visible, onClose }) {
     return "Member";
   }, [currentUser, selectedChild]);
 
-  const handleRoutePress = (route) => {
-    onClose();
+  const handleRoutePress = useCallback(
+    (route) => {
+      onClose();
 
-    if (route) {
-      navigation.navigate(route);
-    }
-  };
+      if (route) {
+        navigation.navigate(route);
+      }
+    },
+    [navigation, onClose]
+  );
+
+  const handleProfilePress = useCallback(
+    () => handleRoutePress("Profile"),
+    [handleRoutePress]
+  );
+
+  const handleSignOut = useCallback(async () => {
+    onClose();
+    await logout();
+    navigation.reset({
+      index: 0,
+      routes: [{ name: "AuthProfile" }],
+    });
+  }, [logout, navigation, onClose]);
 
   return (
     <Modal
@@ -116,7 +133,7 @@ export default function MenuDrawer({ visible, onClose }) {
 
           <TouchableOpacity
             style={styles.profileCard}
-            onPress={() => handleRoutePress("Profile")}
+            onPress={handleProfilePress}
             activeOpacity={0.86}
           >
             <ThemedAvatar
@@ -158,14 +175,7 @@ export default function MenuDrawer({ visible, onClose }) {
 
           <TouchableOpacity
             style={styles.signOutButton}
-            onPress={async () => {
-              onClose();
-              await logout();
-              navigation.reset({
-                index: 0,
-                routes: [{ name: "AuthProfile" }],
-              });
-            }}
+            onPress={handleSignOut}
           >
             <Ionicons name="log-out" size={16} color="#EF4444" />
             <Text style={styles.signOutText}>Sign Out</Text>
@@ -177,6 +187,8 @@ export default function MenuDrawer({ visible, onClose }) {
     </Modal>
   );
 }
+
+export default memo(MenuDrawer);
 
 const styles = StyleSheet.create({
   overlay: {
