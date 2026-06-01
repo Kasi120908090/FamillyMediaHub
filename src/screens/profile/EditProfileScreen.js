@@ -41,7 +41,7 @@ export default function EditProfileScreen({ navigation, onOpenMenu }) {
 
     navigation.reset({
       index: 0,
-      routes: [{ name: "Profile" }],
+      routes: [{ name: "MainTabs", params: { screen: "Profile" } }],
     });
   };
 

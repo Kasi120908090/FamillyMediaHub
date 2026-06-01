@@ -261,7 +261,7 @@ export default function ProfileScreen({ navigation }) {
   }, [familyProfiles, isAuthenticated]);
 
   const getPostLoginRoute = (routeName) =>
-    routeName === "FirstLoginSetup" ? "FirstLoginSetup" : "Gallery";
+    routeName === "FirstLoginSetup" ? "FirstLoginSetup" : "MainTabs";
 
   const closeParentImportModal = () => {
     setShowParentImportModal(false);
