@@ -13,6 +13,7 @@ import {
 } from "@react-navigation/native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { SafeAreaProvider } from "react-native-safe-area-context";
+import { enableFreeze, enableScreens } from "react-native-screens";
 import StackNavigator from "./navigation/StackNavigator";
 import { ProfileProvider, useProfile } from "./context/ProfileContext";
 import { ThemeProvider, useTheme } from "./context/ThemeContext";
@@ -21,6 +22,9 @@ import {
   discoverBackend,
   watchBackendNetworkChanges,
 } from "./services/backendDiscoveryService";
+
+enableScreens(true);
+enableFreeze(true);
 
 function BackupAutoSyncController() {
   const { authToken, currentUser, parentDevices, refreshDevices } = useProfile();

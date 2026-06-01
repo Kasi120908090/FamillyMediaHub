@@ -1,9 +1,14 @@
 import React from "react";
-import { ActivityIndicator, StyleSheet, View } from "react-native";
 import {
-  CardStyleInterpolators,
-  createStackNavigator,
-} from "@react-navigation/stack";
+  ActivityIndicator,
+  Easing,
+  StyleSheet,
+  useWindowDimensions,
+  View,
+} from "react-native";
+import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { createNativeStackNavigator } from "@react-navigation/native-stack";
+import { TabView } from "react-native-tab-view";
 
 import SplashScreen from "../screens/auth/SplashScreen";
 import WelcomeScreen from "../screens/auth/WelcomeScreen";
@@ -35,10 +40,24 @@ import {
   requiresFirstLoginSetup,
 } from "../utils/auth";
 
-const Stack = createStackNavigator();
+const Stack = createNativeStackNavigator();
+const Tab = createBottomTabNavigator();
 
-const withRouteGuard = (ScreenComponent, options = {}) =>
-  function GuardedScreen(props) {
+const MEDIA_ROUTES = [
+  { key: "Gallery", title: "Gallery" },
+  { key: "Images", title: "Images" },
+  { key: "Videos", title: "Videos" },
+  { key: "Files", title: "Files" },
+];
+
+const getMediaRouteIndex = (routeName) =>
+  Math.max(
+    0,
+    MEDIA_ROUTES.findIndex((mediaRoute) => mediaRoute.key === routeName)
+  );
+
+const withRouteGuard = (ScreenComponent, options = {}) => {
+  const GuardedScreen = React.memo(function GuardedScreen(props) {
     const { isAuthenticated, isBootstrapping, currentUser } = useProfile();
     const { theme } = useTheme();
     const routeName = props.route?.name;
@@ -101,43 +120,45 @@ const withRouteGuard = (ScreenComponent, options = {}) =>
     }
 
     return <ScreenComponent {...props} />;
-  };
+  });
 
-const withBottomNav = (ScreenComponent) => {
-  return function ScreenWithBottomNav(props) {
+  return GuardedScreen;
+};
+
+const withMenuDrawer = (ScreenComponent) => {
+  const ScreenWithMenuDrawer = React.memo(function ScreenWithMenuDrawer(props) {
     const [menuVisible, setMenuVisible] = React.useState(false);
     const { theme } = useTheme();
+    const openMenu = React.useCallback(() => setMenuVisible(true), []);
+    const closeMenu = React.useCallback(() => setMenuVisible(false), []);
 
     return (
       <View style={[styles.mainScreen, { backgroundColor: theme.background }]}>
         <View style={[styles.scene, { backgroundColor: theme.background }]}>
           <ScreenComponent
             {...props}
-            onOpenMenu={() => setMenuVisible(true)}
+            onOpenMenu={openMenu}
           />
         </View>
-        <BottomNav activeTab={props.route?.name} />
         <MenuDrawer
           visible={menuVisible}
-          onClose={() => setMenuVisible(false)}
+          onClose={closeMenu}
         />
       </View>
     );
-  };
+  });
+
+  return ScreenWithMenuDrawer;
 };
 
-const GalleryWithBottomNav = withBottomNav(GalleryScreen);
-const ImagesWithBottomNav = withBottomNav(ImagesScreen);
-const VideosWithBottomNav = withBottomNav(VideosScreen);
-const FilesWithBottomNav = withBottomNav(FilesScreen);
-const RecycleBinWithBottomNav = withBottomNav(RecycleBinScreen);
-const UploadWithBottomNav = withBottomNav(UploadScreen);
-const ProfileWithBottomNav = withBottomNav(ProfileScreen);
-const EditProfileWithBottomNav = withBottomNav(EditProfileScreen);
-const NotificationsWithBottomNav = withBottomNav(NotificationsScreen);
-const AppearanceWithBottomNav = withBottomNav(AppearanceScreen);
-const BackupDashboardWithBottomNav = withBottomNav(BackupDashboardScreen);
-const BackupSettingsWithBottomNav = withBottomNav(BackupSettingsScreen);
+const ProfileTabScreen = withMenuDrawer(ProfileScreen);
+const BackupDashboardTabScreen = withMenuDrawer(BackupDashboardScreen);
+const BackupSettingsTabScreen = withMenuDrawer(BackupSettingsScreen);
+const RecycleBinWithMenuDrawer = withMenuDrawer(RecycleBinScreen);
+const UploadWithMenuDrawer = withMenuDrawer(UploadScreen);
+const EditProfileWithMenuDrawer = withMenuDrawer(EditProfileScreen);
+const NotificationsWithMenuDrawer = withMenuDrawer(NotificationsScreen);
+const AppearanceWithMenuDrawer = withMenuDrawer(AppearanceScreen);
 const GuardedFirstLoginSetupScreen = withRouteGuard(FirstLoginSetupScreen, {
   firstLoginOnly: true,
 });
@@ -145,20 +166,133 @@ const GuardedAddFamilyMember = withRouteGuard(AddFamilyMember, {
   requireAuth: true,
   parentAdminOnly: true,
 });
-const GuardedGallery = withRouteGuard(GalleryWithBottomNav, { requireAuth: true });
-const GuardedImages = withRouteGuard(ImagesWithBottomNav, { requireAuth: true });
-const GuardedVideos = withRouteGuard(VideosWithBottomNav, { requireAuth: true });
-const GuardedFiles = withRouteGuard(FilesWithBottomNav, { requireAuth: true });
-const GuardedRecycleBin = withRouteGuard(RecycleBinWithBottomNav, { requireAuth: true });
-const GuardedUpload = withRouteGuard(UploadWithBottomNav, { requireAuth: true });
-const GuardedProfile = withRouteGuard(ProfileWithBottomNav, { requireAuth: true });
-const GuardedEditProfile = withRouteGuard(EditProfileWithBottomNav, { requireAuth: true });
-const GuardedNotifications = withRouteGuard(NotificationsWithBottomNav, { requireAuth: true });
-const GuardedAppearance = withRouteGuard(AppearanceWithBottomNav, { requireAuth: true });
-const GuardedBackupDashboard = withRouteGuard(BackupDashboardWithBottomNav, { requireAuth: true });
-const GuardedBackupSettings = withRouteGuard(BackupSettingsWithBottomNav, { requireAuth: true });
+const GuardedRecycleBin = withRouteGuard(RecycleBinWithMenuDrawer, { requireAuth: true });
+const GuardedUpload = withRouteGuard(UploadWithMenuDrawer, { requireAuth: true });
+const GuardedEditProfile = withRouteGuard(EditProfileWithMenuDrawer, { requireAuth: true });
+const GuardedNotifications = withRouteGuard(NotificationsWithMenuDrawer, { requireAuth: true });
+const GuardedAppearance = withRouteGuard(AppearanceWithMenuDrawer, { requireAuth: true });
+
+const MediaTabs = React.memo(function MediaTabs({ navigation, route }) {
+  const [menuVisible, setMenuVisible] = React.useState(false);
+  const layout = useWindowDimensions();
+  const { theme } = useTheme();
+  const targetMediaTab = route.params?.mediaTab || "Gallery";
+  const [index, setIndex] = React.useState(() => getMediaRouteIndex(targetMediaTab));
+  const routes = React.useMemo(() => MEDIA_ROUTES, []);
+  const openMenu = React.useCallback(() => setMenuVisible(true), []);
+  const closeMenu = React.useCallback(() => setMenuVisible(false), []);
+
+  React.useEffect(() => {
+    const nextIndex = getMediaRouteIndex(targetMediaTab);
+    setIndex((currentIndex) => (currentIndex === nextIndex ? currentIndex : nextIndex));
+  }, [targetMediaTab]);
+
+  const handleIndexChange = React.useCallback(
+    (nextIndex) => {
+      const nextRoute = MEDIA_ROUTES[nextIndex]?.key || "Gallery";
+      setIndex(nextIndex);
+      navigation.setParams({ mediaTab: nextRoute });
+    },
+    [navigation]
+  );
+
+  const sceneProps = React.useMemo(
+    () => ({
+      navigation,
+      onOpenMenu: openMenu,
+    }),
+    [navigation, openMenu]
+  );
+
+  const renderScene = React.useCallback(
+    ({ route: mediaRoute }) => {
+      switch (mediaRoute.key) {
+        case "Images":
+          return <ImagesScreen {...sceneProps} />;
+        case "Videos":
+          return <VideosScreen {...sceneProps} />;
+        case "Files":
+          return <FilesScreen {...sceneProps} />;
+        case "Gallery":
+        default:
+          return <GalleryScreen {...sceneProps} />;
+      }
+    },
+    [sceneProps]
+  );
+
+  return (
+    <View style={[styles.mainScreen, { backgroundColor: theme.background }]}>
+      <TabView
+        navigationState={{ index, routes }}
+        renderScene={renderScene}
+        renderTabBar={() => null}
+        onIndexChange={handleIndexChange}
+        initialLayout={{ width: layout.width }}
+        lazy
+        lazyPreloadDistance={1}
+        swipeEnabled
+        animationEnabled
+        style={styles.scene}
+      />
+      <MenuDrawer visible={menuVisible} onClose={closeMenu} />
+    </View>
+  );
+});
+
+const MediaTabAlias = React.memo(function MediaTabAlias({ navigation, route }) {
+  React.useEffect(() => {
+    navigation.replace("Gallery", { mediaTab: route.name });
+  }, [navigation, route.name]);
+
+  return null;
+});
+
+function MainTabs() {
+  const renderTabBar = React.useCallback(
+    (tabBarProps) => <BottomNav {...tabBarProps} />,
+    []
+  );
+
+  const tabScreenOptions = React.useMemo(
+    () => ({
+      headerShown: false,
+      lazy: true,
+      freezeOnBlur: true,
+      animation: "shift",
+      transitionSpec: {
+        animation: "timing",
+        config: {
+          duration: 170,
+          easing: Easing.out(Easing.cubic),
+        },
+      },
+    }),
+    []
+  );
+
+  return (
+    <Tab.Navigator
+      initialRouteName="Gallery"
+      tabBar={renderTabBar}
+      detachInactiveScreens
+      screenOptions={tabScreenOptions}
+    >
+      <Tab.Screen name="Gallery" component={MediaTabs} />
+      <Tab.Screen name="Images" component={MediaTabAlias} />
+      <Tab.Screen name="Videos" component={MediaTabAlias} />
+      <Tab.Screen name="Files" component={MediaTabAlias} />
+      <Tab.Screen name="Profile" component={ProfileTabScreen} />
+      <Tab.Screen name="BackupDashboard" component={BackupDashboardTabScreen} />
+      <Tab.Screen name="BackupSettings" component={BackupSettingsTabScreen} />
+    </Tab.Navigator>
+  );
+}
+
+const GuardedMainTabs = withRouteGuard(MainTabs, { requireAuth: true });
 
 const noSwipeBackScreens = [
+  "MainTabs",
   "Gallery",
   "Images",
   "Videos",
@@ -170,64 +304,22 @@ const noSwipeBackScreens = [
   "Notifications",
 ];
 
-const bottomNavScreens = [
-  "Gallery",
-  "Images",
-  "Videos",
-  "Files",
-  "RecycleBin",
-  "Upload",
-  "Profile",
-  "Appearance",
-  "BackupSettings",
-  "BackupDashboard",
-];
-
-const authRoutes = ["Splash", "Welcome", "AuthProfile"];
 const verticalRoutes = ["FirstLoginSetup", "AddFamilyMember", "VerifyIdentity", "VerifyOTP"];
-
-const fastOpenTransition = {
-  animation: "timing",
-  config: {
-    duration: 170,
-  },
-};
-
-const fastCloseTransition = {
-  animation: "timing",
-  config: {
-    duration: 140,
-  },
-};
 
 export default function StackNavigator() {
   return (
     <Stack.Navigator
       initialRouteName="Splash"
       screenOptions={({ route }) => {
-        const isAuthScreen = authRoutes.includes(route.name);
-        const isBottomNavScreen = bottomNavScreens.includes(route.name);
         const isVerticalScreen = verticalRoutes.includes(route.name);
-
-        let cardStyleInterpolator = CardStyleInterpolators.forHorizontalIOS;
-
-        if (isAuthScreen) {
-          cardStyleInterpolator = CardStyleInterpolators.forFadeFromCenter;
-        } else if (isBottomNavScreen) {
-          cardStyleInterpolator = CardStyleInterpolators.forFadeFromCenter;
-        } else if (isVerticalScreen) {
-          cardStyleInterpolator = CardStyleInterpolators.forVerticalIOS;
-        }
 
         return {
           headerShown: false,
           gestureEnabled: !noSwipeBackScreens.includes(route.name),
-          animationEnabled: true,
-          transitionSpec: {
-            open: fastOpenTransition,
-            close: fastCloseTransition,
-          },
-          cardStyleInterpolator,
+          animation: isVerticalScreen ? "slide_from_bottom" : "slide_from_right",
+          animationDuration: isVerticalScreen ? 240 : 220,
+          fullScreenGestureEnabled: !noSwipeBackScreens.includes(route.name),
+          freezeOnBlur: true,
         };
       }}
     >
@@ -242,18 +334,12 @@ export default function StackNavigator() {
       <Stack.Screen name="AddFamilyMember" component={GuardedAddFamilyMember} />
       <Stack.Screen name="VerifyIdentity" component={VerifyIdentity} />
       <Stack.Screen name="VerifyOTP" component={VerifyOTP} />
-      <Stack.Screen name="Gallery" component={GuardedGallery} />
-      <Stack.Screen name="Images" component={GuardedImages} />
-      <Stack.Screen name="Videos" component={GuardedVideos} />
-      <Stack.Screen name="Files" component={GuardedFiles} />
+      <Stack.Screen name="MainTabs" component={GuardedMainTabs} />
       <Stack.Screen name="RecycleBin" component={GuardedRecycleBin} />
       <Stack.Screen name="Upload" component={GuardedUpload} />
-      <Stack.Screen name="Profile" component={GuardedProfile} />
       <Stack.Screen name="EditProfile" component={GuardedEditProfile} />
       <Stack.Screen name="Notifications" component={GuardedNotifications} />
       <Stack.Screen name="Appearance" component={GuardedAppearance} />
-      <Stack.Screen name="BackupDashboard" component={GuardedBackupDashboard} />
-      <Stack.Screen name="BackupSettings" component={GuardedBackupSettings} />
     </Stack.Navigator>
   );
 }
