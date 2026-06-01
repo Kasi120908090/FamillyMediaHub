@@ -1,83 +1,126 @@
-import React, { useState } from "react";
+import React, { memo, useCallback, useMemo, useState } from "react";
 import { Alert, Modal, View, Text, StyleSheet, TouchableOpacity, Pressable } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { useNavigation, useRoute } from "@react-navigation/native";
+import { useNavigation } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { softShadow } from "../media/MediaDesign";
 
-const BottomNav = ({ activeTab }) => {
-  const navigation = useNavigation();
-  const route = useRoute();
+const tabs = [
+  { id: "Gallery", icon: "images-outline", activeIcon: "images", label: "Gallery" },
+  { id: "Images", icon: "image-outline", activeIcon: "image", label: "Images" },
+  { id: "Videos", icon: "videocam-outline", activeIcon: "videocam", label: "Videos" },
+  { id: "Files", icon: "folder-outline", activeIcon: "folder", label: "Files" },
+  { id: "BackupSettings", icon: "cloud-upload-outline", activeIcon: "cloud-upload", label: "Back up" },
+];
+
+const mediaTabIds = new Set(["Gallery", "Images", "Videos", "Files"]);
+
+const getFocusedTab = (activeTab, state) => {
+  if (activeTab) {
+    return activeTab;
+  }
+
+  const activeRoute = state?.routes?.[state.index];
+
+  if (activeRoute?.name === "Gallery") {
+    return activeRoute.params?.mediaTab || "Gallery";
+  }
+
+  return activeRoute?.name;
+};
+
+const NavTabButton = memo(function NavTabButton({
+  isActive,
+  navigation,
+  tab,
+  theme,
+}) {
+  const handlePress = useCallback(() => {
+    if (!isActive) {
+      navigation.navigate(tab.id);
+    }
+  }, [isActive, navigation, tab.id]);
+
+  return (
+    <TouchableOpacity
+      style={[styles.navItem, isActive && { backgroundColor: theme.iconBg }]}
+      onPress={handlePress}
+      activeOpacity={0.82}
+    >
+      <Ionicons
+        name={isActive ? tab.activeIcon : tab.icon}
+        size={21}
+        color={isActive ? theme.primary : theme.subText}
+      />
+      <Text
+        style={[
+          styles.navText,
+          { color: isActive ? theme.primary : theme.subText },
+        ]}
+      >
+        {tab.label}
+      </Text>
+    </TouchableOpacity>
+  );
+});
+
+const BottomNav = memo(function BottomNav({ activeTab, navigation: tabNavigation, state }) {
+  const fallbackNavigation = useNavigation();
+  const navigation = tabNavigation || fallbackNavigation;
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const { canManageMedia } = useProfile();
-  const focusedTab = activeTab || route.name;
+  const focusedTab = getFocusedTab(activeTab, state);
   const showUploadShortcut = !["BackupDashboard", "BackupSettings"].includes(focusedTab);
-  const tabs = [
-    { id: "Gallery", icon: "images-outline", activeIcon: "images", label: "Gallery" },
-    { id: "Images", icon: "image-outline", activeIcon: "image", label: "Images" },
-    { id: "Videos", icon: "videocam-outline", activeIcon: "videocam", label: "Videos" },
-    { id: "Files", icon: "folder-outline", activeIcon: "folder", label: "Files" },
-    { id: "BackupSettings", icon: "cloud-upload-outline", activeIcon: "cloud-upload", label: "Back up" },
-  ];
-
   const [uploadOptionsVisible, setUploadOptionsVisible] = useState(false);
 
-  const openUploadOptions = () => setUploadOptionsVisible(true);
-  const closeUploadOptions = () => setUploadOptionsVisible(false);
+  const bottomNavStyle = useMemo(
+    () => [
+      styles.bottomNav,
+      softShadow,
+      {
+        backgroundColor: theme.tabBar,
+        paddingBottom: Math.max(insets.bottom, 8),
+      },
+    ],
+    [insets.bottom, theme.tabBar]
+  );
 
-  const handleUploadOption = (category) => {
-    closeUploadOptions();
-    if (!canManageMedia) {
-      Alert.alert("View only", "Switch back to your own account to upload media.");
-      return;
-    }
-    navigation.navigate("Upload", { category, openPicker: true });
-  };
+  const openUploadOptions = useCallback(() => setUploadOptionsVisible(true), []);
+  const closeUploadOptions = useCallback(() => setUploadOptionsVisible(false), []);
+  const handleUploadOption = useCallback(
+    (category) => {
+      closeUploadOptions();
+      if (!canManageMedia) {
+        Alert.alert("View only", "Switch back to your own account to upload media.");
+        return;
+      }
+      const rootNavigation = navigation.getParent?.() || navigation;
+      rootNavigation.navigate("Upload", { category, openPicker: true });
+    },
+    [canManageMedia, closeUploadOptions, navigation]
+  );
+  const handleImageUpload = useCallback(() => handleUploadOption("image"), [handleUploadOption]);
+  const handleVideoUpload = useCallback(() => handleUploadOption("video"), [handleUploadOption]);
+  const handleFileUpload = useCallback(() => handleUploadOption("file"), [handleUploadOption]);
 
   return (
     <>
-      <View
-        style={[
-          styles.bottomNav,
-          softShadow,
-          {
-            backgroundColor: theme.tabBar,
-            paddingBottom: Math.max(insets.bottom, 8),
-          },
-        ]}
-      >
+      <View style={bottomNavStyle}>
         {tabs.map((tab) => {
           const isActive =
             focusedTab === tab.id ||
             (tab.id === "BackupSettings" && focusedTab === "BackupDashboard");
           return (
-            <TouchableOpacity
+            <NavTabButton
               key={tab.id}
-              style={[styles.navItem, isActive && { backgroundColor: theme.iconBg }]}
-              onPress={() => {
-                if (!isActive) {
-                  navigation.navigate(tab.id);
-                }
-              }}
-              activeOpacity={0.82}
-            >
-              <Ionicons
-                name={isActive ? tab.activeIcon : tab.icon}
-                size={21}
-                color={isActive ? theme.primary : theme.subText}
-              />
-              <Text
-                style={[
-                  styles.navText,
-                  { color: isActive ? theme.primary : theme.subText },
-                ]}
-              >
-                {tab.label}
-              </Text>
-            </TouchableOpacity>
+              isActive={isActive}
+              navigation={navigation}
+              tab={tab}
+              theme={theme}
+            />
           );
         })}
       </View>
@@ -103,15 +146,15 @@ const BottomNav = ({ activeTab }) => {
         <TouchableOpacity style={styles.modalOverlay} activeOpacity={1} onPress={closeUploadOptions} />
         <View style={[styles.modalContent, { backgroundColor: theme.surface }]}>
           <Text style={[styles.modalTitle, { color: theme.text }]}>Upload</Text>
-          <TouchableOpacity style={styles.optionRow} onPress={() => handleUploadOption("image")}> 
+          <TouchableOpacity style={styles.optionRow} onPress={handleImageUpload}> 
             <Ionicons name="image-outline" size={22} color={theme.primary} />
             <Text style={[styles.optionLabel, { color: theme.text }]}>Image</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.optionRow} onPress={() => handleUploadOption("video")}> 
+          <TouchableOpacity style={styles.optionRow} onPress={handleVideoUpload}> 
             <Ionicons name="videocam-outline" size={22} color={theme.primary} />
             <Text style={[styles.optionLabel, { color: theme.text }]}>Video</Text>
           </TouchableOpacity>
-          <TouchableOpacity style={styles.optionRow} onPress={() => handleUploadOption("file")}> 
+          <TouchableOpacity style={styles.optionRow} onPress={handleFileUpload}> 
             <Ionicons name="document-outline" size={22} color={theme.primary} />
             <Text style={[styles.optionLabel, { color: theme.text }]}>File</Text>
           </TouchableOpacity>
@@ -119,7 +162,7 @@ const BottomNav = ({ activeTab }) => {
       </Modal>
     </>
   );
-};
+});
 
 const styles = StyleSheet.create({
   bottomNav: {
