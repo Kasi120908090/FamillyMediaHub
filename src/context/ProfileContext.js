@@ -1192,6 +1192,17 @@ export function ProfileProvider({ children }) {
     ]
   );
 
+  useEffect(() => {
+    console.log("[Perf] ProfileContext value changed", {
+      authTokenSet: Boolean(authToken),
+      currentUserId: currentUser?.id,
+      mediaItemsLength: mediaItems.length,
+      selectedChildId,
+      isChildAccount: childAccount,
+      isParentAdminReady: parentAdminReady,
+    });
+  }, [authToken, currentUser?.id, mediaItems.length, selectedChildId, childAccount, parentAdminReady]);
+
   return <ProfileContext.Provider value={value}>{children}</ProfileContext.Provider>;
 }
 

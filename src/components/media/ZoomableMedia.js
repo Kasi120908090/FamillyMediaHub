@@ -1,16 +1,17 @@
-import React, { useEffect, useRef, useState } from "react";
-import { Animated, StyleSheet, TouchableOpacity, View } from "react-native";
-import { Ionicons } from "@expo/vector-icons";
+﻿import React, { useEffect, useRef } from "react";
+import { Animated, StyleSheet, View } from "react-native";
 import {
   PanGestureHandler,
   PinchGestureHandler,
-  State,
   TapGestureHandler,
+  State,
 } from "react-native-gesture-handler";
 
 const MIN_SCALE = 1;
 const MAX_SCALE = 4;
-const STEP_SCALE = 0.75;
+const DOUBLE_TAP_SCALE = 2;
+const SWIPE_DOWN_THRESHOLD = 120;
+const SWIPE_DOWN_MAX_X_DELTA = 100;
 
 const clamp = (value, min, max) => Math.min(Math.max(value, min), max);
 
@@ -20,152 +21,190 @@ export default function ZoomableMedia({
   contentStyle,
   resetKey,
   onZoomChange,
+  onSwipeDown,
   controls = true,
 }) {
+  const baseScale = useRef(new Animated.Value(1)).current;
+  const pinchScale = useRef(new Animated.Value(1)).current;
+  const scale = useRef(
+    Animated.multiply(baseScale, pinchScale).interpolate({
+      inputRange: [MIN_SCALE, MAX_SCALE],
+      outputRange: [MIN_SCALE, MAX_SCALE],
+      extrapolate: "clamp",
+    })
+  ).current;
+  const pan = useRef(new Animated.ValueXY({ x: 0, y: 0 })).current;
+  const lastScale = useRef(1);
+  const lastPan = useRef({ x: 0, y: 0 });
+  const containerSize = useRef({ width: 0, height: 0 }).current;
   const panRef = useRef(null);
   const pinchRef = useRef(null);
   const doubleTapRef = useRef(null);
-  const baseScale = useRef(new Animated.Value(MIN_SCALE)).current;
-  const pinchScale = useRef(new Animated.Value(1)).current;
-  const translateX = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(0)).current;
-  const lastScale = useRef(MIN_SCALE);
-  const lastTranslate = useRef({ x: 0, y: 0 });
-  const [zoomLevel, setZoomLevel] = useState(MIN_SCALE);
-
-  const setZoom = (nextScale) => {
-    const scale = clamp(nextScale, MIN_SCALE, MAX_SCALE);
-    lastScale.current = scale;
-    setZoomLevel(scale);
-    onZoomChange?.(scale);
-
-    Animated.spring(baseScale, {
-      toValue: scale,
-      useNativeDriver: true,
-      speed: 18,
-      bounciness: 0,
-    }).start();
-
-    pinchScale.setValue(1);
-
-    if (scale <= MIN_SCALE) {
-      lastTranslate.current = { x: 0, y: 0 };
-      translateX.setOffset(0);
-      translateY.setOffset(0);
-      Animated.parallel([
-        Animated.spring(translateX, {
-          toValue: 0,
-          useNativeDriver: true,
-          speed: 18,
-          bounciness: 0,
-        }),
-        Animated.spring(translateY, {
-          toValue: 0,
-          useNativeDriver: true,
-          speed: 18,
-          bounciness: 0,
-        }),
-      ]).start();
-    }
-  };
 
   useEffect(() => {
-    setZoom(MIN_SCALE);
-  }, [resetKey]);
+    baseScale.setValue(1);
+    pinchScale.setValue(1);
+    lastScale.current = 1;
+    lastPan.current = { x: 0, y: 0 };
+    Animated.parallel([
+      Animated.spring(pan.x, { toValue: 0, useNativeDriver: true }),
+      Animated.spring(pan.y, { toValue: 0, useNativeDriver: true }),
+    ]).start();
 
-  const onPinchGestureEvent = Animated.event(
+    onZoomChange?.(1);
+  }, [resetKey, onZoomChange]);
+
+  const onLayout = (event) => {
+    const { width, height } = event.nativeEvent.layout;
+    containerSize.width = width;
+    containerSize.height = height;
+  };
+
+  const onPinchEvent = Animated.event(
     [{ nativeEvent: { scale: pinchScale } }],
     { useNativeDriver: true }
   );
 
-  const onPanGestureEvent = Animated.event(
-    [
-      {
-        nativeEvent: {
-          translationX: translateX,
-          translationY: translateY,
-        },
-      },
-    ],
+  const onPinchStateChange = ({ nativeEvent }) => {
+    if (nativeEvent.oldState === State.ACTIVE) {
+      const { focalX, focalY, scale: gestureScale } = nativeEvent;
+      const nextScale = clamp(lastScale.current * gestureScale, MIN_SCALE, MAX_SCALE);
+
+      // Calculate the focal point relative to the center of the view
+      // This allows us to adjust the pan so the zoom follows the fingers
+      if (nextScale > MIN_SCALE && containerSize.width > 0 && focalX !== undefined) {
+        const centerX = containerSize.width / 2;
+        const centerY = containerSize.height / 2;
+
+        // Offset the pan by the distance from center * the change in scale
+        lastPan.current.x += (focalX - centerX) * (1 - gestureScale);
+        lastPan.current.y += (focalY - centerY) * (1 - gestureScale);
+
+        pan.setOffset(lastPan.current);
+        pan.setValue({ x: 0, y: 0 });
+      }
+
+      lastScale.current = nextScale;
+      baseScale.setValue(nextScale);
+      pinchScale.setValue(1);
+
+      if (nextScale <= MIN_SCALE) {
+        lastPan.current = { x: 0, y: 0 };
+        Animated.parallel([
+          Animated.spring(pan.x, { toValue: 0, useNativeDriver: true }),
+          Animated.spring(pan.y, { toValue: 0, useNativeDriver: true }),
+        ]).start(() => {
+          pan.setOffset({ x: 0, y: 0 });
+          pan.setValue({ x: 0, y: 0 });
+        });
+      }
+
+      onZoomChange?.(nextScale > MIN_SCALE ? nextScale : 1);
+    }
+  };
+
+  const onPanEvent = Animated.event(
+    [{ nativeEvent: { translationX: pan.x, translationY: pan.y } }],
     { useNativeDriver: true }
   );
 
-  const handlePinchStateChange = ({ nativeEvent }) => {
+  const onPanStateChange = ({ nativeEvent }) => {
+    if (nativeEvent.state === State.BEGAN) {
+      pan.setOffset(lastPan.current);
+      pan.setValue({ x: 0, y: 0 });
+    }
+
     if (nativeEvent.oldState === State.ACTIVE) {
-      setZoom(lastScale.current * nativeEvent.scale);
+      const translationX = nativeEvent.translationX;
+      const translationY = nativeEvent.translationY;
+      const totalX = lastPan.current.x + translationX;
+      const totalY = lastPan.current.y + translationY;
+
+      if (lastScale.current <= MIN_SCALE) {
+        if (
+          onSwipeDown &&
+          translationY > SWIPE_DOWN_THRESHOLD &&
+          Math.abs(translationX) < SWIPE_DOWN_MAX_X_DELTA
+        ) {
+          onSwipeDown();
+          return;
+        }
+
+        lastPan.current = { x: 0, y: 0 };
+        Animated.parallel([
+          Animated.spring(pan.x, { toValue: 0, useNativeDriver: true }),
+          Animated.spring(pan.y, { toValue: 0, useNativeDriver: true }),
+        ]).start(() => {
+          pan.setOffset({ x: 0, y: 0 });
+          pan.setValue({ x: 0, y: 0 });
+        });
+      } else {
+        lastPan.current = { x: totalX, y: totalY };
+        pan.setOffset(lastPan.current);
+        pan.setValue({ x: 0, y: 0 });
+      }
     }
   };
 
-  const handlePanStateChange = ({ nativeEvent }) => {
-    if (nativeEvent.oldState !== State.ACTIVE) {
+  const onDoubleTapStateChange = ({ nativeEvent }) => {
+    if (nativeEvent.state !== State.ACTIVE) {
       return;
     }
 
-    if (lastScale.current <= MIN_SCALE) {
-      lastTranslate.current = { x: 0, y: 0 };
-      translateX.setValue(0);
-      translateY.setValue(0);
-      return;
-    }
+    const nextScale = lastScale.current > MIN_SCALE ? MIN_SCALE : DOUBLE_TAP_SCALE;
+    lastScale.current = nextScale;
+    Animated.spring(baseScale, { toValue: nextScale, useNativeDriver: true }).start(() => {
+      if (nextScale <= MIN_SCALE) {
+        lastPan.current = { x: 0, y: 0 };
+        Animated.parallel([
+          Animated.spring(pan.x, { toValue: 0, useNativeDriver: true }),
+          Animated.spring(pan.y, { toValue: 0, useNativeDriver: true }),
+        ]).start(() => {
+          pan.setOffset({ x: 0, y: 0 });
+          pan.setValue({ x: 0, y: 0 });
+        });
+      }
+    });
 
-    lastTranslate.current = {
-      x: lastTranslate.current.x + nativeEvent.translationX,
-      y: lastTranslate.current.y + nativeEvent.translationY,
-    };
-    translateX.setOffset(lastTranslate.current.x);
-    translateX.setValue(0);
-    translateY.setOffset(lastTranslate.current.y);
-    translateY.setValue(0);
+    onZoomChange?.(nextScale > MIN_SCALE ? nextScale : 1);
   };
 
-  const handleDoubleTap = ({ nativeEvent }) => {
-    if (nativeEvent.state === State.ACTIVE) {
-      setZoom(lastScale.current > MIN_SCALE ? MIN_SCALE : 2);
-    }
+  const animatedStyle = {
+    transform: [
+      { translateX: pan.x },
+      { translateY: pan.y },
+      { scale },
+    ],
   };
-
-  const scale = Animated.multiply(baseScale, pinchScale).interpolate({
-    inputRange: [MIN_SCALE, MAX_SCALE],
-    outputRange: [MIN_SCALE, MAX_SCALE],
-    extrapolate: "clamp",
-  });
 
   return (
-    <View style={[styles.container, style]}>
+    <View style={[styles.container, style]} onLayout={onLayout}>
       <PinchGestureHandler
         ref={pinchRef}
         simultaneousHandlers={[panRef, doubleTapRef]}
-        onGestureEvent={onPinchGestureEvent}
-        onHandlerStateChange={handlePinchStateChange}
+        onGestureEvent={onPinchEvent}
+        onHandlerStateChange={onPinchStateChange}
+        minPointers={2}
       >
         <Animated.View style={styles.fill}>
           <PanGestureHandler
             ref={panRef}
-            enabled={zoomLevel > MIN_SCALE}
-            simultaneousHandlers={[pinchRef]}
-            onGestureEvent={onPanGestureEvent}
-            onHandlerStateChange={handlePanStateChange}
+            simultaneousHandlers={[pinchRef, doubleTapRef]}
+            onGestureEvent={onPanEvent}
+            onHandlerStateChange={onPanStateChange}
+            minPointers={1}
+            maxPointers={2}
+            activeOffsetX={[-10, 10]}
+            activeOffsetY={[-10, 10]}
           >
             <Animated.View style={styles.fill}>
               <TapGestureHandler
                 ref={doubleTapRef}
                 numberOfTaps={2}
-                simultaneousHandlers={[pinchRef]}
-                onHandlerStateChange={handleDoubleTap}
+                simultaneousHandlers={[pinchRef, panRef]}
+                onHandlerStateChange={onDoubleTapStateChange}
               >
-                <Animated.View
-                  style={[
-                    styles.content,
-                    contentStyle,
-                    {
-                      transform: [
-                        { translateX },
-                        { translateY },
-                        { scale },
-                      ],
-                    },
-                  ]}
-                >
+                <Animated.View style={[styles.content, contentStyle, animatedStyle]}>
                   {children}
                 </Animated.View>
               </TapGestureHandler>
@@ -173,23 +212,10 @@ export default function ZoomableMedia({
           </PanGestureHandler>
         </Animated.View>
       </PinchGestureHandler>
-
-      {controls ? (
-        <View style={styles.controls}>
-          <ZoomButton icon="remove" onPress={() => setZoom(zoomLevel - STEP_SCALE)} />
-          <ZoomButton icon="scan" onPress={() => setZoom(MIN_SCALE)} />
-          <ZoomButton icon="add" onPress={() => setZoom(zoomLevel + STEP_SCALE)} />
-        </View>
-      ) : null}
+      {controls ? <View style={styles.controls} /> : null}
     </View>
   );
 }
-
-const ZoomButton = ({ icon, onPress }) => (
-  <TouchableOpacity style={styles.controlButton} onPress={onPress} activeOpacity={0.78}>
-    <Ionicons name={icon} size={18} color="#fff" />
-  </TouchableOpacity>
-);
 
 const styles = StyleSheet.create({
   container: {
@@ -206,19 +232,13 @@ const styles = StyleSheet.create({
   },
   controls: {
     position: "absolute",
-    right: 14,
-    bottom: 106,
+    left: 0,
+    right: 0,
+    bottom: 0,
     zIndex: 4,
-    borderRadius: 22,
     overflow: "hidden",
     backgroundColor: "rgba(17,24,39,0.78)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.16)",
-  },
-  controlButton: {
-    width: 44,
-    height: 42,
-    alignItems: "center",
-    justifyContent: "center",
+    borderTopWidth: 1,
+    borderTopColor: "rgba(255,255,255,0.16)",
   },
 });

@@ -25,6 +25,7 @@ const normalizeBackupItem = (item = {}) => ({
   file_name:
     item.file_name || item.filename || item.name || item.original_file_name || item.original_name || "Backup file",
   file_size: Number(item.file_size || item.size || item.bytes || item.fileSize || 0),
+  duration: Number(item.duration || 0),
   content_type: item.content_type || item.mime_type || item.mimeType || "application/octet-stream",
   status: item.status || item.state || item.upload_status || "UNKNOWN",
   completed_at:
@@ -55,6 +56,7 @@ const createBackupInitBody = (item, sha256Hash) => ({
   sha256_hash: sha256Hash,
   device_id: Number(item.device_id || 0),
   mime_type: item.content_type || "application/octet-stream",
+  duration: item.duration || 0,
   original_path: item.local_uri || item.file_name,
   child_id: item.child_id || undefined,
 });

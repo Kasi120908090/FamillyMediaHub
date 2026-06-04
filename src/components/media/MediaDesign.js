@@ -36,11 +36,7 @@ export const softShadow = {
 };
 
 export const formatDuration = (seconds = 0) => {
-  if (!seconds || Number.isNaN(Number(seconds))) {
-    return "00:30";
-  }
-
-  const total = Math.max(0, Math.floor(Number(seconds)));
+  const total = Math.max(0, Math.floor(Number(seconds || 0)));
   const minutes = String(Math.floor(total / 60)).padStart(2, "0");
   const secs = String(total % 60).padStart(2, "0");
   return `${minutes}:${secs}`;
@@ -87,6 +83,9 @@ export const getFileTone = (name = "", type = "") => {
   }
   if (value.includes("ppt") || value.includes("presentation")) {
     return { icon: "easel", color: "#F97316", bg: "#FFEDD5", label: "PPT" };
+  }
+  if (value.includes("txt") || value.includes("text/plain")) {
+    return { icon: "document-text", color: "#6B7280", bg: "#F3F4F6", label: "TXT" };
   }
 
   return { icon: "document", color: ui.purple, bg: ui.purpleSoft, label: "FILE" };

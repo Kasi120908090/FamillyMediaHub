@@ -1,58 +1,62 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
 import React, { useEffect } from "react";
 import { ActivityIndicator, StyleSheet, Text, View } from "react-native";
 import { FamilyHeroIllustration } from "../../components/auth/FlowPrimitives";
+import { useProfile } from "../../context/ProfileContext";
 
-const PROFILE_CACHE_KEY = "@family-media-hub/profile-options";
-const TOKEN_STORAGE_KEY = "@family-media-hub/token";
-const USER_STORAGE_KEY = "@family-media-hub/user";
-
+/**
+ * SplashScreen - Persistent Login Entry Point
+ * 
+ * This screen appears during app startup while ProfileContext validates
+ * the stored session (token & user data). It waits for bootstrap to complete
+ * before routing to the appropriate screen.
+ * 
+ * Persistent Login Flow:
+ * 1. App starts
+ * 2. SplashScreen renders
+ * 3. ProfileContext.bootstrapSession runs in parallel:
+ *    - Reads token & user from AsyncStorage
+ *    - Validates token with backend (authService.getMe)
+ *    - Updates authentication state
+ *    - Sets isBootstrapping = false when done
+ * 4. SplashScreen waits for isBootstrapping = false
+ * 5. Routes based on isAuthenticated:
+ *    - ✅ Valid session → MainTabs (authenticated area)
+ *    - ❌ No session or invalid → Welcome (login)
+ */
 export default function SplashScreen({ navigation }) {
+  const { isBootstrapping, isAuthenticated, currentUser } = useProfile();
+
   useEffect(() => {
-    let isMounted = true;
+    // Still bootstrapping, don't navigate yet
+    if (isBootstrapping) {
+      console.log("[SplashScreen] Bootstrapping session...");
+      return;
+    }
 
-    const bootstrap = async () => {
-      try {
-        const [[, cachedProfiles], [, storedToken], [, storedUser]] = await AsyncStorage.multiGet([
-          PROFILE_CACHE_KEY,
-          TOKEN_STORAGE_KEY,
-          USER_STORAGE_KEY,
-        ]);
+    // Bootstrap complete, determine route based on auth state
+    console.log("[SplashScreen] Bootstrap complete", {
+      isAuthenticated,
+      hasUser: !!currentUser?.id,
+      userId: currentUser?.id,
+      username: currentUser?.username,
+    });
 
-        if (!isMounted) {
-          return;
-        }
+    let targetRoute = "Welcome"; // Default: show login
 
-        const parsedProfiles = JSON.parse(cachedProfiles || "[]");
-        const hasCachedProfiles = Array.isArray(parsedProfiles) && parsedProfiles.length > 0;
-        const hasSession = Boolean(storedToken && storedUser);
+    if (isAuthenticated && currentUser?.id) {
+      // Valid session exists - go to main app
+      targetRoute = "MainTabs";
+      console.log("[SplashScreen] ✅ Session valid, routing to MainTabs");
+    } else {
+      // No session or invalid - go to login
+      console.log("[SplashScreen] ❌ No valid session, routing to Welcome");
+    }
 
-        setTimeout(() => {
-          navigation.reset({
-            index: 0,
-            routes: [{ name: hasCachedProfiles || hasSession ? "AuthProfile" : "Welcome" }],
-          });
-        }, 900);
-      } catch {
-        if (!isMounted) {
-          return;
-        }
-
-        setTimeout(() => {
-          navigation.reset({
-            index: 0,
-            routes: [{ name: "Welcome" }],
-          });
-        }, 900);
-      }
-    };
-
-    bootstrap();
-
-    return () => {
-      isMounted = false;
-    };
-  }, [navigation]);
+    navigation.reset({
+      index: 0,
+      routes: [{ name: targetRoute }],
+    });
+  }, [isBootstrapping, isAuthenticated, currentUser, navigation]);
 
   return (
     <View style={styles.container}>

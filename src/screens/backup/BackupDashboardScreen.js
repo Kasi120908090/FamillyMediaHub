@@ -241,28 +241,28 @@ export default function BackupDashboardScreen({ navigation, onOpenMenu }) {
             title="Photos"
             count={stats.photo.count}
             bytes={stats.photo.bytes}
-            onPress={() => navigation.navigate("Images")}
+            onPress={() => navigation.jumpTo("Gallery", { mediaTab: "Images" })}
           />
           <CategoryTile
             icon="videocam-outline"
             title="Videos"
             count={stats.video.count}
             bytes={stats.video.bytes}
-            onPress={() => navigation.navigate("Videos")}
+            onPress={() => navigation.jumpTo("Gallery", { mediaTab: "Videos" })}
           />
           <CategoryTile
             icon="document-text-outline"
             title="Files"
             count={stats.file.count}
             bytes={stats.file.bytes}
-            onPress={() => navigation.navigate("Files")}
+            onPress={() => navigation.jumpTo("Gallery", { mediaTab: "Files" })}
           />
         </View>
 
         <SectionHeader
           title="Recent Items"
           action="View All"
-          onActionPress={() => navigation.navigate("Gallery")}
+          onActionPress={() => navigation.jumpTo("Gallery", { mediaTab: "Gallery" })}
         />
         {recentItems.length ? (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.recentList}>

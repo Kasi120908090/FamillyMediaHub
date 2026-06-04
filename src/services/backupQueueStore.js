@@ -23,6 +23,7 @@ const normalizeQueueItem = (item) => ({
   file_size: Number(item.file_size || item.fileSize || item.size || 0),
   content_type: item.content_type || item.contentType || item.mimeType || "application/octet-stream",
   device_id: item.device_id || item.deviceId || null,
+  duration: Number(item.duration || 0),
   child_id: item.child_id || item.childId || null,
   sha256_hash: item.sha256_hash || item.sha256Hash || "",
   bytes_received: Number(item.bytes_received || item.bytesReceived || 0),
@@ -41,6 +42,7 @@ const queueItemColumns = [
   "file_size",
   "content_type",
   "device_id",
+  "duration",
   "child_id",
   "sha256_hash",
   "bytes_received",
@@ -148,6 +150,7 @@ const createSQLiteStore = () => {
           file_size INTEGER NOT NULL,
           content_type TEXT NOT NULL,
           device_id INTEGER,
+          duration REAL NOT NULL DEFAULT 0,
           child_id INTEGER,
           sha256_hash TEXT,
           bytes_received INTEGER NOT NULL DEFAULT 0,
@@ -158,6 +161,17 @@ const createSQLiteStore = () => {
           completed_at TEXT
         )`
       );
+
+      // Schema Migration: Add duration column if it's missing in existing installations
+      try {
+        const tableInfo = await getAll(`PRAGMA table_info(${TABLE_NAME})`);
+        const hasDuration = tableInfo.some((col) => col.name === "duration");
+        if (!hasDuration) {
+          await run(`ALTER TABLE ${TABLE_NAME} ADD COLUMN duration REAL NOT NULL DEFAULT 0`);
+        }
+      } catch (migrationError) {
+        console.error("[BackupQueueStore] SQLite migration failed:", migrationError);
+      }
     },
     getAll: async () =>
       (await getAll(`SELECT * FROM ${TABLE_NAME} ORDER BY updated_at DESC`)).map(normalizeQueueItem),
@@ -264,6 +278,7 @@ export const backupQueueStore = {
       file_name: asset.name || asset.fileName || `backup-${Date.now()}`,
       file_size: asset.size || asset.fileSize || 0,
       content_type: asset.mimeType || asset.type || "application/octet-stream",
+      duration: asset.duration || 0,
       device_id: defaults.device_id,
       child_id: defaults.child_id,
       status: defaults.status,

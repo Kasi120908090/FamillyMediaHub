@@ -293,6 +293,7 @@ const scanMediaAssets = async (settings) => {
         name: asset.filename || info?.filename || `media-${asset.id}`,
         size: fileSize,
         mimeType: info?.mimeType || getMimeType(asset),
+        duration: asset.duration,
         mediaType: asset.mediaType,
       });
     } catch (error) {
@@ -388,13 +389,39 @@ export const backupAutoSyncService = {
     }
 
     await backupQueueStore.init();
-    const queuedIds = await getQueuedIds();
-    const newAssets = scanResult.assets.filter((asset) => !queuedIds.has(asset.id));
+    const allQueued = await backupQueueStore.getAll();
+    const activeStatuses = [
+      BACKUP_QUEUE_STATUS.PENDING,
+      BACKUP_QUEUE_STATUS.UPLOADING,
+      BACKUP_QUEUE_STATUS.COMPLETE,
+    ];
+    const activeQueuedIds = new Set(
+      allQueued.filter((i) => activeStatuses.includes(i.status)).map((i) => i.id)
+    );
+    const queuedMap = new Map(allQueued.map((i) => [i.id, i]));
+
+    const newAssets = [];
+    const migrationPromises = [];
+
+    for (const asset of scanResult.assets) {
+      const existing = queuedMap.get(asset.id);
+      if (!activeQueuedIds.has(asset.id)) {
+        newAssets.push(asset);
+      } else if (existing && !existing.duration && asset.duration > 0) {
+        // Data Migration: Backfill duration for existing queued items discovered in scan
+        migrationPromises.push(backupQueueStore.update(asset.id, { duration: asset.duration }));
+      }
+    }
+
     const typeStats = getAssetTypeStats(scanResult.assets);
     const queued = await backupService.enqueueAssets(newAssets, {
       device_id: deviceId,
       child_id: childId,
     });
+
+    if (migrationPromises.length > 0) {
+      await Promise.all(migrationPromises);
+    }
 
     await backupQueueMetaStore.merge({
       last_autosync_scan_at: new Date().toISOString(),
@@ -520,14 +547,31 @@ export const backupAutoSyncService = {
 
       // Queue the scanned assets
       await backupQueueStore.init();
-      const queuedIds = await getQueuedIds();
-      const newAssets = scanResult.assets.filter((asset) => !queuedIds.has(asset.id));
+      const allQueued = await backupQueueStore.getAll();
+      const queuedMap = new Map(allQueued.map((item) => [item.id, item]));
+
+      const newAssets = [];
+      const migrationPromises = [];
+
+      for (const asset of scanResult.assets) {
+        const existing = queuedMap.get(asset.id);
+        if (!existing) {
+          newAssets.push(asset);
+        } else if ((existing.duration === 0 || !existing.duration) && asset.duration > 0) {
+          migrationPromises.push(backupQueueStore.update(asset.id, { duration: asset.duration }));
+        }
+      }
+
       const typeStats = getAssetTypeStats(scanResult.assets);
 
       const queued = await backupService.enqueueAssets(newAssets, {
         device_id: deviceId,
         child_id: childId,
       });
+
+      if (migrationPromises.length > 0) {
+        await Promise.all(migrationPromises);
+      }
 
       // Update metadata
       await backupQueueMetaStore.merge({

@@ -4,11 +4,13 @@ import {
   Alert,
   Image,
   Modal,
+  KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -17,14 +19,17 @@ import * as ImagePicker from "expo-image-picker";
 import { Ionicons } from "@expo/vector-icons";
 import {
   AuthFlowShell,
+  FamilyHeroIllustration,
   FlowCard,
   FlowInput,
   InfoBanner,
   PrimaryAction,
+  SecondaryAction,
   SectionTitle,
 } from "../../components/auth/FlowPrimitives";
 import ThemedAvatar from "../../components/common/ThemedAvatar";
 import { useAuth } from "../../hooks/useAuth";
+import { authService } from "../../services/authService";
 
 const relationships = [
   "Father",
@@ -74,7 +79,7 @@ const formatBackendDate = (date) => {
 };
 
 export default function AddFamilyMember({ navigation, route }) {
-  const { createChild, currentUser, isSubmitting, profile } = useAuth();
+  const { createChild, currentUser, isSubmitting, profile, authToken } = useAuth();
   const [fullName, setFullName] = useState("");
   const [relationship, setRelationship] = useState("");
   const [dateOfBirth, setDateOfBirth] = useState(null);
@@ -87,6 +92,12 @@ export default function AddFamilyMember({ navigation, route }) {
   const [showRelationshipPicker, setShowRelationshipPicker] = useState(false);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [pickerValue, setPickerValue] = useState(DATE_LIMITS.default);
+
+  const [showAdminPasswordModal, setShowAdminPasswordModal] = useState(false);
+  const [adminPasswordInput, setAdminPasswordInput] = useState("");
+  const [adminPasswordVisible, setAdminPasswordVisible] = useState(false);
+  const [adminPasswordError, setAdminPasswordError] = useState("");
+  const [isVerifyingPassword, setIsVerifyingPassword] = useState(false);
 
   const adminPassword = route?.params?.adminPassword || "";
 
@@ -162,12 +173,6 @@ export default function AddFamilyMember({ navigation, route }) {
       nextErrors.username = "Username is required.";
     }
 
-    if (!password.trim()) {
-      nextErrors.password = "Password is required.";
-    } else if (!/^(?=.*[a-z])(?=.*[A-Z])(?=.*[\d\W]).{8,}$/.test(password)) {
-      nextErrors.password = "Use 8+ chars with upper, lower and number or symbol.";
-    }
-
     return nextErrors;
   }, [email, fullName, password, relationship, username]);
 
@@ -192,32 +197,44 @@ export default function AddFamilyMember({ navigation, route }) {
   };
 
   const handleSubmit = async () => {
-    if (!adminPassword) {
-      Alert.alert(
-        "Verification required",
-        "Please return to the previous screen and verify the admin password again."
-      );
-      return;
-    }
-
     if (Object.keys(errors).length) {
       Alert.alert("Missing details", "Please complete the required fields before continuing.");
       return;
     }
 
+    // If we already have a password from params, we could use it, 
+    // but per request we show the pop-up to ask/verify it here.
+    setAdminPasswordInput(adminPassword); // Pre-fill if exists
+    setAdminPasswordError("");
+    setShowAdminPasswordModal(true);
+  };
+
+  const handleConfirmAdminAndSubmit = async () => {
+    if (!adminPasswordInput.trim()) {
+      setAdminPasswordError("Admin password is required.");
+      return;
+    }
+
     try {
+      setIsVerifyingPassword(true);
+      setAdminPasswordError("");
+
+      // Verify the password with the backend first
+      await authService.verifyPassword(adminPasswordInput.trim(), authToken);
+
       await createChild({
         name: fullName.trim(),
         relationship,
         email: email.trim(),
         username: username.trim(),
         password: password.trim(),
-        admin_password: adminPassword,
+        admin_password: adminPasswordInput.trim(),
         date_of_birth: formatBackendDate(dateOfBirth),
         gender: gender || undefined,
         profile_image: profileImage || undefined,
       });
 
+      setShowAdminPasswordModal(false);
       Alert.alert("Member added", "The new family profile has been created successfully.", [
         {
           text: "Continue",
@@ -225,7 +242,14 @@ export default function AddFamilyMember({ navigation, route }) {
         },
       ]);
     } catch (error) {
-      Alert.alert("Unable to add member", error.message);
+      if (error.status === 401 || error.message.toLowerCase().includes("password")) {
+        setAdminPasswordError("Incorrect admin password. Please try again.");
+      } else {
+        setShowAdminPasswordModal(false);
+        Alert.alert("Unable to add member", error.message);
+      }
+    } finally {
+      setIsVerifyingPassword(false);
     }
   };
 
@@ -363,7 +387,7 @@ export default function AddFamilyMember({ navigation, route }) {
         />
 
         <FlowInput
-          label="Password *"
+          label="Password"
           value={password}
           onChangeText={setPassword}
           placeholder="Create a password"
@@ -454,6 +478,56 @@ export default function AddFamilyMember({ navigation, route }) {
             </ScrollView>
           </FlowCard>
         </TouchableOpacity>
+      </Modal>
+
+      <Modal visible={showAdminPasswordModal} transparent animationType="fade">
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === "ios" ? "padding" : "height"}
+            style={styles.modalKeyboardWrap}
+          >
+            <FlowCard style={styles.modalCard}>
+              <View style={styles.modalIllustrationWrap}>
+                <FamilyHeroIllustration locked />
+              </View>
+              <Text style={styles.modalTitle}>Verify Admin Password</Text>
+              <Text style={styles.modalSubtitle}>
+                For security reasons, please enter your admin password to add a new user.
+              </Text>
+              <FlowInput
+                value={adminPasswordInput}
+                onChangeText={(value) => {
+                  setAdminPasswordInput(value);
+                  if (adminPasswordError) {
+                    setAdminPasswordError("");
+                  }
+                }}
+                placeholder="Enter admin password"
+                icon="lock-closed-outline"
+                secureTextEntry
+                secureVisible={adminPasswordVisible}
+                onToggleSecure={() => setAdminPasswordVisible((current) => !current)}
+                error={adminPasswordError}
+                autoFocus
+              />
+              <PrimaryAction
+                label="Verify & Add Member"
+                onPress={handleConfirmAdminAndSubmit}
+                loading={isVerifyingPassword || isSubmitting}
+                icon="checkmark"
+              />
+              <SecondaryAction
+                label="Cancel"
+                onPress={() => {
+                  setShowAdminPasswordModal(false);
+                  setAdminPasswordInput("");
+                  setAdminPasswordVisible(false);
+                  setAdminPasswordError("");
+                }}
+              />
+            </FlowCard>
+          </KeyboardAvoidingView>
+        </View>
       </Modal>
     </AuthFlowShell>
   );
@@ -679,5 +753,34 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: "#3D267F",
     fontWeight: "700",
+  },
+  modalKeyboardWrap: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 340,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+  },
+  modalIllustrationWrap: {
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#2D158B",
+    textAlign: "center",
+  },
+  modalSubtitle: {
+    marginTop: 8,
+    marginBottom: 16,
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#8C80B8",
+    textAlign: "center",
   },
 });

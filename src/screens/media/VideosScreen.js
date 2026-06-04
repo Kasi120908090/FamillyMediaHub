@@ -1,7 +1,6 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Alert,
-  FlatList,
   InteractionManager,
   Modal,
   Platform,
@@ -11,14 +10,12 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { FlashList } from "@shopify/flash-list";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import ThemedAvatar from "../../components/common/ThemedAvatar";
 import AppHeader from "../../components/navigation/AppHeader";
-import CachedImage from "../../components/media/CachedImage";
-import VideoPlayer from "../../components/media/VideoPlayer";
 import VideoThumbnail from "../../components/media/VideoThumbnail";
-import ZoomableMedia from "../../components/media/ZoomableMedia";
 import {
   FadeInView,
   MediaBadge,
@@ -33,6 +30,7 @@ import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
 import { getMediaUri, getVideoThumbnailUri } from "../../utils/media";
+import { getOrCreateVideoThumbnailUri } from "../../utils/videoThumbnails";
 
 const getVideoItemKey = (item, index) => {
   const stablePart =
@@ -113,6 +111,17 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
     isChildAccount,
     moveMediaToRecycleBin,
   } = useProfile();
+  const renderCounter = useRef(0);
+  renderCounter.current += 1;
+
+  useEffect(() => {
+    console.log("[Perf] VideosScreen mount", {
+      renderCount: renderCounter.current,
+      mediaItemsCount: mediaItems.length,
+      selectedChildId,
+    });
+    return () => console.log("[Perf] VideosScreen unmount");
+  }, []);
   const { theme } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
   const [filterVisible, setFilterVisible] = useState(false);
@@ -121,10 +130,6 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
   const [endDate, setEndDate] = useState(null);
   const [isGridView, setIsGridView] = useState(true);
   const [isDateReversed, setIsDateReversed] = useState(false);
-  const [viewerVisible, setViewerVisible] = useState(false);
-  const [currentVideo, setCurrentVideo] = useState(null);
-  const [hasVideoFirstFrame, setHasVideoFirstFrame] = useState(false);
-  const [showVideoCover, setShowVideoCover] = useState(false);
   const [sceneReady, setSceneReady] = useState(false);
 
   useEffect(() => {
@@ -136,19 +141,19 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
     return () => task.cancel();
   }, []);
 
-  const videos = useMemo(
-    () =>
-      (sceneReady ? mediaItems : [])
-        .filter(
-          (item) => {
-            if (!isChildAccount || !selectedChildId) {
-              return true;
-            }
-
-            const itemChildId = getMediaChildId(item);
-            return itemChildId !== null && String(itemChildId) === String(selectedChildId);
+  const videos = useMemo(() => {
+    console.time("[Perf] Videos filteredVideos");
+    const result = (sceneReady ? mediaItems : [])
+      .filter(
+        (item) => {
+          if (!isChildAccount || !selectedChildId) {
+            return true;
           }
-        )
+
+          const itemChildId = getMediaChildId(item);
+          return itemChildId !== null && String(itemChildId) === String(selectedChildId);
+        }
+      )
         .filter(
           (item) => item.category === "videos" || item.content_type?.startsWith("video/")
         )
@@ -167,11 +172,13 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
           isDateReversed
             ? getItemDate(firstItem) - getItemDate(secondItem)
             : getItemDate(secondItem) - getItemDate(firstItem)
-        ),
-    [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]
-  );
+        );
+    console.timeEnd("[Perf] Videos filteredVideos");
+    return result;
+  }, [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]);
 
   const groupedVideos = useMemo(() => {
+    console.time("[Perf] Videos groupedVideos");
     const groups = {};
 
     videos.forEach((item) => {
@@ -198,49 +205,23 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
       ),
     }));
 
-    return grouped.sort((firstGroup, secondGroup) =>
+    const result = grouped.sort((firstGroup, secondGroup) =>
       isDateReversed
         ? firstGroup.date - secondGroup.date
         : secondGroup.date - firstGroup.date
     );
+    console.timeEnd("[Perf] Videos groupedVideos");
+    return result;
   }, [videos, isDateReversed]);
 
   const hasActiveFilters = Boolean(startDate || endDate || isGridView || isDateReversed);
 
-  const getVideoUri = getMediaUri;
-  const currentVideoUri = currentVideo ? getVideoUri(currentVideo) : null;
-  const currentVideoThumbnailUri = currentVideo ? getVideoThumbnailUri(currentVideo) : null;
-
   const openVideo = (item) => {
-    setCurrentVideo(item);
-    setHasVideoFirstFrame(false);
-    setShowVideoCover(true);
-    setViewerVisible(true);
-  };
-
-  const closeVideo = () => {
-    setViewerVisible(false);
-    setCurrentVideo(null);
-    setHasVideoFirstFrame(false);
-    setShowVideoCover(false);
-  };
-
-  const deleteCurrentVideo = () => {
-    if (!currentVideo || !canManageMedia) {
-      return;
-    }
-
-    Alert.alert("Move to Recycle Bin", "This video will be moved to Recycle Bin.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Move",
-        style: "destructive",
-        onPress: () => {
-          moveMediaToRecycleBin(currentVideo);
-          closeVideo();
-        },
-      },
-    ]);
+    const index = videos.findIndex((v) => v.id === item.id);
+    navigation.navigate("FullScreenVideo", {
+      mediaItems: videos,
+      initialIndex: index >= 0 ? index : 0,
+    });
   };
 
   const handleDateChange = (_, selectedDate) => {
@@ -272,10 +253,11 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
     setIsDateReversed(false);
   };
 
-  const renderVideoCard = (item, index, sectionTitle) => {
-    if (isGridView) {
-      return (
-        <TouchableOpacity
+  const renderVideoCard = useCallback(
+    (item, index, sectionTitle) => {
+      if (isGridView) {
+        return (
+          <TouchableOpacity
           key={getVideoItemKey(item, index)}
           style={[
             styles.gridCard,
@@ -286,9 +268,7 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
           activeOpacity={0.88}
         >
           <View style={styles.gridPreviewWrap}>
-            <VideoThumbnail item={item} style={styles.gridPreview} />
-            <PlayButton small />
-            <MediaBadge>{formatDuration(item.duration)}</MediaBadge>
+            <VideoThumbnail item={item} style={styles.gridPreview} small showDuration />
           </View>
           <Text style={[styles.gridTitle, { color: theme.text }]} numberOfLines={1}>
             {getFriendlyTitle(item, "Video")}
@@ -308,9 +288,7 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
         activeOpacity={0.88}
       >
         <View style={styles.videoPreviewWrap}>
-          <VideoThumbnail item={item} style={styles.videoPreview} />
-          <PlayButton />
-          <MediaBadge>{formatDuration(item.duration)}</MediaBadge>
+          <VideoThumbnail item={item} style={styles.videoPreview} showDuration />
         </View>
         <View style={styles.videoText}>
           <Text style={[styles.videoTitle, { color: theme.text }]} numberOfLines={1}>
@@ -322,9 +300,10 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
         </View>
       </TouchableOpacity>
     );
-  };
+  }, [isGridView, openVideo, theme]);
 
-  const renderVideoSection = ({ item: section, index }) => (
+  const renderVideoSection = useCallback(
+    ({ item: section, index }) => (
     <FadeInView style={styles.section} delay={Math.min(index * 30, 150)}>
       <View style={styles.sectionHeader}>
         <View>
@@ -348,19 +327,9 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
         section.data.map((item, index) => renderVideoCard(item, index, section.title))
       )}
     </FadeInView>
+  ),
+  [isGridView, renderVideoCard, theme]
   );
-
-  useEffect(() => {
-    if (!viewerVisible || !currentVideoUri) {
-      return undefined;
-    }
-
-    const coverTimer = setTimeout(() => {
-      setShowVideoCover(false);
-    }, 900);
-
-    return () => clearTimeout(coverTimer);
-  }, [currentVideoUri, viewerVisible]);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -383,13 +352,14 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
         active={hasActiveFilters}
       />
 
-      <FlatList
+      <FlashList
         data={groupedVideos}
         keyExtractor={getVideoSectionKey}
         contentContainerStyle={styles.listContent}
         initialNumToRender={5}
         maxToRenderPerBatch={6}
         windowSize={7}
+        estimatedItemSize={260}
         removeClippedSubviews
         renderItem={renderVideoSection}
         ListEmptyComponent={
@@ -525,52 +495,6 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
         </View>
       </Modal>
 
-      <Modal visible={viewerVisible} onRequestClose={closeVideo} animationType="fade">
-        <View style={styles.videoModalContainer}>
-          <TouchableOpacity style={styles.closeButton} onPress={closeVideo}>
-            <Ionicons name="close-circle" size={36} color="#fff" />
-          </TouchableOpacity>
-          {canManageMedia ? (
-            <TouchableOpacity style={styles.deleteButton} onPress={deleteCurrentVideo}>
-              <Ionicons name="trash" size={22} color="#FCA5A5" />
-            </TouchableOpacity>
-          ) : null}
-          {currentVideoUri ? (
-            <>
-              <ZoomableMedia
-                resetKey={currentVideoUri}
-                style={styles.fullScreenVideo}
-              >
-                <VideoPlayer
-                  key={currentVideoUri}
-                  source={currentVideoUri}
-                  style={styles.fullScreenVideo}
-                  contentFit="contain"
-                  nativeControls
-                  shouldPlay={viewerVisible}
-                  surfaceType="textureView"
-                  posterSource={
-                    currentVideoThumbnailUri ? { uri: currentVideoThumbnailUri } : null
-                  }
-                  onFirstFrameRender={() => {
-                    setHasVideoFirstFrame(true);
-                    setShowVideoCover(false);
-                  }}
-                />
-              </ZoomableMedia>
-              {showVideoCover && !hasVideoFirstFrame && currentVideoThumbnailUri ? (
-                <View style={styles.videoLoadingCover} pointerEvents="none">
-                  <CachedImage
-                    source={{ uri: currentVideoThumbnailUri }}
-                    style={styles.fullScreenVideo}
-                    resizeMode="contain"
-                  />
-                </View>
-              ) : null}
-            </>
-          ) : null}
-        </View>
-      </Modal>
     </View>
   );
 }
@@ -650,7 +574,7 @@ const styles = StyleSheet.create({
   videoCard: {
     backgroundColor: "#fff",
     borderRadius: 10,
-    padding: 8,
+    padding: 12,
     marginBottom: 12,
   },
   videoPreviewWrap: {
@@ -678,7 +602,7 @@ const styles = StyleSheet.create({
     justifyContent: "flex-start",
   },
   gridCard: {
-    width: "31.5%",
+    width: "30.5%",
     borderRadius: 8,
     padding: 0,
     marginBottom: 10,

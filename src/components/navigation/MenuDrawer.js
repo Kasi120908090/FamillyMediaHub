@@ -1,5 +1,6 @@
-import React, { memo, useCallback, useMemo } from "react";
+import React, { memo, useCallback, useEffect, useMemo, useRef } from "react";
 import {
+  Animated,
   Modal,
   Pressable,
   StyleSheet,
@@ -9,6 +10,7 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { useNavigation } from "@react-navigation/native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import ThemedAvatar from "../common/ThemedAvatar";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
@@ -45,7 +47,8 @@ const menuItems = [
     iconColor: "#EC4899",
     iconBg: "#FDEAF4",
     title: "Favorites",
-    route: "Images",
+    route: "Gallery",
+    params: { mediaTab: "Images" },
   },
   {
     icon: "trash",
@@ -66,6 +69,8 @@ const getProfileRelation = (user, selectedChild) =>
   selectedChild?.role ||
   "Member";
 
+const DRAWER_WIDTH = 330;
+
 function MenuDrawer({ visible, onClose }) {
   const navigation = useNavigation();
   const {
@@ -75,6 +80,17 @@ function MenuDrawer({ visible, onClose }) {
     logout,
   } = useProfile();
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
+  const translateX = useRef(new Animated.Value(-DRAWER_WIDTH)).current;
+
+  useEffect(() => {
+    Animated.timing(translateX, {
+      toValue: visible ? 0 : -DRAWER_WIDTH,
+      duration: 220,
+      useNativeDriver: true,
+    }).start();
+  }, [translateX, visible]);
+
   const profileSubtitle = useMemo(() => {
     if (isParentAdmin(currentUser)) {
       return "Owner";
@@ -88,12 +104,27 @@ function MenuDrawer({ visible, onClose }) {
   }, [currentUser, selectedChild]);
 
   const handleRoutePress = useCallback(
-    (route) => {
+    (route, params) => {
       onClose();
 
-      if (route) {
-        navigation.navigate(route);
+      if (!route) {
+        return;
       }
+
+      if (route === "Gallery") {
+        if (typeof navigation.jumpTo === "function") {
+          navigation.jumpTo("Gallery", params);
+          return;
+        }
+
+        navigation.navigate("MainTabs", {
+          screen: "Gallery",
+          params,
+        });
+        return;
+      }
+
+      navigation.navigate(route, params);
     },
     [navigation, onClose]
   );
@@ -114,14 +145,21 @@ function MenuDrawer({ visible, onClose }) {
 
   return (
     <Modal
-      animationType="slide"
+      animationType="none"
       transparent
       visible={visible}
       onRequestClose={onClose}
+      statusBarTranslucent
+      presentationStyle="overFullScreen"
     >
       <View style={styles.overlay}>
-        <View style={[styles.drawer, { backgroundColor: theme.surface }]}>
-          <View style={styles.header}>
+        <Animated.View
+          style={[
+            styles.drawer,
+            { backgroundColor: theme.surface, transform: [{ translateX }], height: '100%' },
+          ]}
+        >
+          <View style={[styles.header, { paddingTop: insets.top + 8 }]}>
             <TouchableOpacity style={styles.iconButton} onPress={onClose}>
               <Ionicons name="close" size={20} color={theme.primary} />
             </TouchableOpacity>
@@ -152,7 +190,7 @@ function MenuDrawer({ visible, onClose }) {
               <TouchableOpacity
                 key={item.title}
                 style={styles.menuItem}
-                onPress={() => handleRoutePress(item.route)}
+                onPress={() => handleRoutePress(item.route, item.params)}
               >
                 <View
                   style={[styles.menuIcon, { backgroundColor: theme.iconBg }]}
@@ -180,7 +218,7 @@ function MenuDrawer({ visible, onClose }) {
             <Ionicons name="log-out" size={16} color="#EF4444" />
             <Text style={styles.signOutText}>Sign Out</Text>
           </TouchableOpacity>
-        </View>
+        </Animated.View>
 
         <Pressable style={styles.scrim} onPress={onClose} />
       </View>
@@ -215,13 +253,11 @@ const styles = StyleSheet.create({
   },
 
   header: {
-    height: 70,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
     marginHorizontal: -20,
     paddingHorizontal: 16,
-    paddingTop: 26,
     marginBottom: 16,
   },
 

@@ -1,8 +1,10 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
 import { StyleSheet, View } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import CachedImage from "./CachedImage";
 import { getVideoThumbnailUri } from "../../utils/media";
+import { getOrCreateVideoThumbnailUri } from "../../utils/videoThumbnails";
+import { formatDuration, MediaBadge } from "./MediaDesign";
 
 function VideoFallback({ style }) {
   return (
@@ -16,22 +18,55 @@ export default function VideoThumbnail({
   item,
   style,
   thumbnailUri,
+  showDuration = false,
+  small = false,
 }) {
-  const resolvedThumbnailUri = thumbnailUri || getVideoThumbnailUri(item);
+  const remoteThumb = thumbnailUri || getVideoThumbnailUri(item);
+  const [generatedThumb, setGeneratedThumb] = useState(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    setGeneratedThumb(null);
+
+    if (remoteThumb) {
+      return () => {
+        isMounted = false;
+      };
+    }
+
+    getOrCreateVideoThumbnailUri(item).then((uri) => {
+      if (isMounted) {
+        setGeneratedThumb(uri);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [item, remoteThumb]);
+
+  const displayUri = remoteThumb || generatedThumb;
 
   return (
     <View style={[styles.container, style]}>
-      {resolvedThumbnailUri ? (
-        <CachedImage source={{ uri: resolvedThumbnailUri }} style={styles.media} resizeMode="cover" />
+      {displayUri ? (
+        <CachedImage source={{ uri: displayUri }} style={styles.media} resizeMode="cover" />
       ) : (
         <VideoFallback />
       )}
 
       <View style={styles.overlay}>
-        <View style={styles.playBadge}>
-          <Ionicons name="play" size={18} color="#fff" />
+        <View style={[styles.playBadge, small && styles.playBadgeSmall]}>
+          <Ionicons name={small ? "play" : "play-sharp"} size={small ? 12 : 20} color="#fff" />
         </View>
       </View>
+
+      {showDuration && item?.duration > 0 && (
+        <MediaBadge icon="time-outline">
+          {formatDuration(item.duration)}
+        </MediaBadge>
+      )}
     </View>
   );
 }
@@ -64,5 +99,10 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.48)",
     borderWidth: 1,
     borderColor: "rgba(255,255,255,0.38)",
+  },
+  playBadgeSmall: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
   },
 });

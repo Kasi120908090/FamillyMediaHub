@@ -19,6 +19,9 @@ import { softShadow, ui } from "../../components/media/MediaDesign";
 import { mediaService } from "../../services/mediaService";
 import { useAuth } from "../../hooks/useAuth";
 import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
+import * as S from "../../theme/designSystem";
+import * as j from "../../theme/responsive";
+import { commonStyles as x } from "../../theme/commonStyles";
 import { isParentAdminReady } from "../../utils/auth";
 
 const uploadTypes = [
@@ -166,18 +169,34 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
           type: "*/*",
         });
 
-        if (result.canceled || !result.assets?.length) {
+        // Handle both expo-document-picker response shapes across versions
+        // Newer: { canceled: boolean, assets: [...] }
+        // Older: { type: 'cancel'|'success', uri, name, size, mimeType }
+        if (!result.canceled && Array.isArray(result.assets) && result.assets.length) {
+          setSelectedFiles(
+            result.assets.map((asset, index) => ({
+              uri: asset.uri,
+              name: asset.name || `file-${Date.now()}-${index + 1}`,
+              type: asset.mimeType || "application/octet-stream",
+              size: asset.size || asset.fileSize || 0,
+            }))
+          );
           return;
         }
 
-        setSelectedFiles(
-          result.assets.map((asset, index) => ({
-            uri: asset.uri,
-            name: asset.name || `file-${Date.now()}-${index + 1}`,
-            type: asset.mimeType || "application/octet-stream",
-            size: asset.size || asset.fileSize || 0,
-          }))
-        );
+        if (result.type === "success" && result.uri) {
+          setSelectedFiles([
+            {
+              uri: result.uri,
+              name: result.name || `file-${Date.now()}`,
+              type: result.mimeType || "application/octet-stream",
+              size: result.size || 0,
+            },
+          ]);
+          return;
+        }
+
+        // Cancelled or unsupported shape
         return;
       }
 
@@ -188,13 +207,9 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
         return;
       }
 
-      const mediaTypeOption =
-        activeCategory === "video"
-          ? ImagePicker.MediaTypeOptions.Videos
-          : ImagePicker.MediaTypeOptions.Images;
-
       const result = await ImagePicker.launchImageLibraryAsync({
-        mediaTypes: mediaTypeOption,
+        // Using array syntax is the modern standard for expo-image-picker to avoid deprecation warnings
+        mediaTypes: activeCategory === "video" ? ["videos"] : ["images"],
         allowsMultipleSelection: true,
         quality: 1,
       });
@@ -207,6 +222,7 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
               asset.fileName ||
               `${activeCategory}-${Date.now()}-${index + 1}.${activeCategory === "video" ? "mp4" : "jpg"}`,
             type: asset.mimeType || (activeCategory === "video" ? "video/mp4" : "image/jpeg"),
+            duration: asset.duration ? asset.duration / 1000 : undefined,
             size: asset.fileSize || asset.size || 0,
           }))
         );
@@ -321,6 +337,13 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
         lastProgressRef.current = 0;
         setUploadProgress(fileIndex / selectedFiles.length);
 
+        console.log(`[UploadScreen] Dispatching upload for item ${fileIndex + 1}:`, {
+          name: file.name,
+          uri: file.uri,
+          size: file.size,
+          type: file.type
+        });
+
         await uploadMedia({
           upload_id: uploadId,
           child_id: isParentAccount ? undefined : loggedInChildId,
@@ -359,7 +382,11 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
           : `${selectedFiles.length} items were uploaded successfully.`
       );
       setSelectedFiles([]);
-      navigation.navigate(uploadDestinationByCategory[category] || "Gallery");
+      const parentNavigation = navigation.getParent?.() || navigation;
+      parentNavigation.navigate("MainTabs", {
+        screen: "Gallery",
+        params: { mediaTab: uploadDestinationByCategory[category] || "Gallery" },
+      });
     } catch (error) {
       if (uploadCancelRequestedRef.current || error?.name === "AbortError") {
         Alert.alert("Upload cancelled", "Your upload was cancelled.");
@@ -679,6 +706,9 @@ export default function UploadScreen({ navigation, onOpenMenu, route }) {
     </View>
   );
 }
+
+// Alias StyleSheet to 's' to match the usage in the T style object below
+const s = StyleSheet;
 
 const styles = StyleSheet.create({
   container: {

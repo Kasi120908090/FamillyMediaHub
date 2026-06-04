@@ -21,6 +21,7 @@ import GalleryScreen from "../screens/media/GalleryScreen";
 import ImagesScreen from "../screens/media/ImagesScreen";
 import VideosScreen from "../screens/media/VideosScreen";
 import FilesScreen from "../screens/media/FilesScreen";
+import FullScreenVideoScreen from "../screens/media/FullScreenVideoScreen";
 import RecycleBinScreen from "../screens/media/RecycleBinScreen";
 import UploadScreen from "../screens/media/UploadScreen";
 import ProfileScreen from "../screens/profile/ProfileScreen";
@@ -178,22 +179,81 @@ const MediaTabs = React.memo(function MediaTabs({ navigation, route }) {
   const { theme } = useTheme();
   const targetMediaTab = route.params?.mediaTab || "Gallery";
   const [index, setIndex] = React.useState(() => getMediaRouteIndex(targetMediaTab));
+  const [animationEnabled, setAnimationEnabled] = React.useState(false);
   const routes = React.useMemo(() => MEDIA_ROUTES, []);
+  const [loadedRoutes, setLoadedRoutes] = React.useState(() => [routes[getMediaRouteIndex(targetMediaTab)]?.key || "Gallery"]);
+  const tabRenderCount = React.useRef(0);
+  const tabSwitchRef = React.useRef(null);
+  const isSwipeRef = React.useRef(false);
+  
+  // Gesture tracking to prevent vertical scrolls from triggering horizontal swipes
+  // Issue: Users accidentally switch tabs when scrolling vertically
+  // Solution: Detect gesture direction and disable swipe if primarily vertical
+  const gestureStateRef = React.useRef({
+    startX: 0,
+    startY: 0,
+    currentX: 0,
+    currentY: 0,
+    isVerticalScroll: false,
+  });
+  const [swipeEnabledState, setSwipeEnabledState] = React.useState(true);
+  const swipeEnabledRef = React.useRef(true);
+
+  // Update ref whenever state changes
+  React.useEffect(() => {
+    swipeEnabledRef.current = swipeEnabledState;
+  }, [swipeEnabledState]);
+  
   const openMenu = React.useCallback(() => setMenuVisible(true), []);
   const closeMenu = React.useCallback(() => setMenuVisible(false), []);
 
+  tabRenderCount.current += 1;
+
+  React.useEffect(() => {
+    console.log("[Perf] MediaTabs mounted", { renderCount: tabRenderCount.current, initialTab: targetMediaTab });
+    return () => console.log("[Perf] MediaTabs unmounted", { finalTab: routes[index]?.key });
+  }, []);
+
+
+
   React.useEffect(() => {
     const nextIndex = getMediaRouteIndex(targetMediaTab);
-    setIndex((currentIndex) => (currentIndex === nextIndex ? currentIndex : nextIndex));
+    setIndex((currentIndex) => {
+      if (currentIndex === nextIndex) {
+        return currentIndex;
+      }
+      // Params-driven change (from BottomNav or setParams): disable animation
+      if (!isSwipeRef.current) {
+        setAnimationEnabled(false);
+      }
+      return nextIndex;
+    });
   }, [targetMediaTab]);
+
+  React.useEffect(() => {
+    const nextKey = routes[index]?.key || "Gallery";
+    setLoadedRoutes((previous) =>
+      previous.includes(nextKey) ? previous : [...previous, nextKey]
+    );
+  }, [index, routes]);
 
   const handleIndexChange = React.useCallback(
     (nextIndex) => {
       const nextRoute = MEDIA_ROUTES[nextIndex]?.key || "Gallery";
+      const currentRoute = routes[index]?.key || "Gallery";
+      console.log("[Perf] Tab change requested", { from: currentRoute, to: nextRoute, currentIndex: index, nextIndex });
+      tabSwitchRef.current = `${currentRoute}->${nextRoute}-${Date.now()}`;
+      // Mark this as a swipe gesture
+      isSwipeRef.current = true;
+      setAnimationEnabled(true);
       setIndex(nextIndex);
       navigation.setParams({ mediaTab: nextRoute });
+      // Reset swipe flag after a brief delay
+      setTimeout(() => {
+        isSwipeRef.current = false;
+      }, 50);
     },
-    [navigation]
+    [navigation, index, routes]
   );
 
   const sceneProps = React.useMemo(
@@ -206,6 +266,12 @@ const MediaTabs = React.memo(function MediaTabs({ navigation, route }) {
 
   const renderScene = React.useCallback(
     ({ route: mediaRoute }) => {
+      const isLoaded = loadedRoutes.includes(mediaRoute.key);
+      console.log("[Perf] TabView.renderScene", { route: mediaRoute.key, isLoaded, activeIndex: index });
+      if (!isLoaded) {
+        return <View style={styles.scene} />;
+      }
+
       switch (mediaRoute.key) {
         case "Images":
           return <ImagesScreen {...sceneProps} />;
@@ -218,7 +284,7 @@ const MediaTabs = React.memo(function MediaTabs({ navigation, route }) {
           return <GalleryScreen {...sceneProps} />;
       }
     },
-    [sceneProps]
+    [loadedRoutes, sceneProps, index]
   );
 
   return (
@@ -230,9 +296,10 @@ const MediaTabs = React.memo(function MediaTabs({ navigation, route }) {
         onIndexChange={handleIndexChange}
         initialLayout={{ width: layout.width }}
         lazy
-        lazyPreloadDistance={1}
-        swipeEnabled
-        animationEnabled
+        lazyPreloadDistance={0}
+        renderLazyPlaceholder={() => <View style={styles.scene} />}
+        swipeEnabled={true}
+        animationEnabled={animationEnabled}
         style={styles.scene}
       />
       <MenuDrawer visible={menuVisible} onClose={closeMenu} />
@@ -240,19 +307,8 @@ const MediaTabs = React.memo(function MediaTabs({ navigation, route }) {
   );
 });
 
-const MediaTabAlias = React.memo(function MediaTabAlias({ navigation, route }) {
-  React.useEffect(() => {
-    navigation.replace("Gallery", { mediaTab: route.name });
-  }, [navigation, route.name]);
-
-  return null;
-});
-
 function MainTabs() {
-  const renderTabBar = React.useCallback(
-    (tabBarProps) => <BottomNav {...tabBarProps} />,
-    []
-  );
+  const renderTabBar = React.useCallback((tabBarProps) => <BottomNav {...tabBarProps} />, []);
 
   const tabScreenOptions = React.useMemo(
     () => ({
@@ -272,20 +328,19 @@ function MainTabs() {
   );
 
   return (
-    <Tab.Navigator
+    <View style={{ flex: 1 }}>
+      <Tab.Navigator
       initialRouteName="Gallery"
       tabBar={renderTabBar}
       detachInactiveScreens
       screenOptions={tabScreenOptions}
     >
       <Tab.Screen name="Gallery" component={MediaTabs} />
-      <Tab.Screen name="Images" component={MediaTabAlias} />
-      <Tab.Screen name="Videos" component={MediaTabAlias} />
-      <Tab.Screen name="Files" component={MediaTabAlias} />
       <Tab.Screen name="Profile" component={ProfileTabScreen} />
       <Tab.Screen name="BackupDashboard" component={BackupDashboardTabScreen} />
       <Tab.Screen name="BackupSettings" component={BackupSettingsTabScreen} />
     </Tab.Navigator>
+    </View>
   );
 }
 
@@ -335,6 +390,7 @@ export default function StackNavigator() {
       <Stack.Screen name="VerifyIdentity" component={VerifyIdentity} />
       <Stack.Screen name="VerifyOTP" component={VerifyOTP} />
       <Stack.Screen name="MainTabs" component={GuardedMainTabs} />
+      <Stack.Screen name="FullScreenVideo" component={FullScreenVideoScreen} />
       <Stack.Screen name="RecycleBin" component={GuardedRecycleBin} />
       <Stack.Screen name="Upload" component={GuardedUpload} />
       <Stack.Screen name="EditProfile" component={GuardedEditProfile} />
@@ -348,6 +404,41 @@ const styles = StyleSheet.create({
   mainScreen: {
     flex: 1,
     backgroundColor: "#F5F6FA",
+  },
+  modalOverlay: {
+    flex: 1,
+    backgroundColor: "rgba(32, 21, 88, 0.34)",
+    justifyContent: "center",
+    padding: 24,
+  },
+  modalKeyboardWrap: {
+    width: "100%",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  modalCard: {
+    width: "100%",
+    maxWidth: 340,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+  },
+  modalIllustrationWrap: {
+    alignItems: "center",
+    marginBottom: 10,
+  },
+  modalTitle: {
+    fontSize: 18,
+    fontWeight: "900",
+    color: "#2D158B",
+    textAlign: "center",
+  },
+  modalSubtitle: {
+    marginTop: 8,
+    marginBottom: 16,
+    fontSize: 12,
+    lineHeight: 18,
+    color: "#8C80B8",
+    textAlign: "center",
   },
   scene: {
     flex: 1,

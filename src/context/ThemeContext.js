@@ -2,6 +2,7 @@ import React, {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
 } from "react";
@@ -31,6 +32,10 @@ export const ThemeProvider = ({ children }) => {
     }),
     [changeTheme, theme, themeName]
   );
+
+  useEffect(() => {
+    console.log("[Perf] ThemeContext value changed", { themeName });
+  }, [themeName]);
 
   return (
     <ThemeContext.Provider

@@ -92,6 +92,15 @@ export default function ProfileScreen({ navigation, onOpenMenu }) {
         {/* ACCOUNT */}
         <Section title="Account" theme={theme}>
           <Item icon="person" title="Personal Information" subtitle="Name, email, phone" theme={theme} />
+          {!isChildAccount && (
+            <Item
+              icon="person-add"
+              title="Add User"
+              subtitle="Add a new family member"
+              theme={theme}
+              onPress={() => navigation.navigate("AddFamilyMember")}
+            />
+          )}
           <Item icon="shield-checkmark" title="Privacy & Security" subtitle="Password, 2FA" theme={theme} />
           <Item
             icon="notifications"

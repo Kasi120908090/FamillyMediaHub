@@ -4,8 +4,8 @@ import { apiRequest } from "./api";
 import { getCurrentBackendBaseUrl } from "./backendDiscoveryService";
 import { Sha256, base64ToBytes, sha256Bytes } from "../utils/sha256";
 
-const LARGE_VIDEO_LIMIT = 100 * 1024 * 1024;
-const VIDEO_CHUNK_SIZE = 8 * 1024 * 1024;
+const LARGE_VIDEO_LIMIT = 200 * 1024 * 1024;
+const VIDEO_CHUNK_SIZE = 16 * 1024 * 1024;
 const MEDIA_LIST_CACHE_TTL = 60 * 1000;
 const mediaListCache = new Map();
 const pendingMediaLists = new Map();
@@ -69,7 +69,7 @@ const getCompletedMedia = (response) =>
   response?.media || response?.item || response?.data || response;
 
 const createChunkFileUri = (uploadId, chunkIndex) =>
-  `${FileSystem.cacheDirectory || ""}family-hub-${uploadId}-${chunkIndex}.part`;
+  `${FileSystem.cacheDirectory || ""}${FileSystem.cacheDirectory?.endsWith("/") ? "" : "/"}family-hub-${uploadId}-${chunkIndex}.part`;
 
 const appendOptionalUploadFields = (target, payload) => {
   if (payload.child_id !== undefined && payload.child_id !== null) {
@@ -83,10 +83,23 @@ const appendOptionalUploadFields = (target, payload) => {
   if (payload.subfolder) {
     target.subfolder = payload.subfolder;
   }
+
+  if (payload.category) {
+    target.category = payload.category;
+  }
+
+  if (payload.file?.duration) {
+    target.duration = payload.file.duration;
+  }
 };
 
 const uploadChunkedVideo = async (payload, token, options = {}) => {
   const fileSize = Number(payload.file.size || 0);
+  console.log("[UploadService] Starting chunked upload:", {
+    file: payload.file.name,
+    uri: payload.file.uri,
+    size: fileSize,
+  });
 
   if (!fileSize) {
     throw new Error("Unable to read video size. Choose the video again and retry.");
@@ -109,6 +122,9 @@ const uploadChunkedVideo = async (payload, token, options = {}) => {
     token,
     body: initBody,
     signal: options.signal,
+  }).then(res => {
+    console.log("[UploadService] Init response status:", res ? 'ok' : 'failed');
+    return res;
   });
   const uploadId = getUploadId(initResponse);
 
@@ -182,6 +198,9 @@ const uploadChunkedVideo = async (payload, token, options = {}) => {
       final_checksum: fullHash.digest(),
     },
     signal: options.signal,
+  }).then(res => {
+    console.log("[UploadService] Completion response:", res);
+    return res;
   });
 
   clearMediaListCache();
@@ -232,6 +251,12 @@ export const mediaService = {
       return uploadChunkedVideo(payload, token, options);
     }
 
+    console.log("[UploadService] Standard upload request:", {
+      name: payload.file.name,
+      uri: payload.file.uri,
+      size: payload.file.size,
+    });
+
     const formData = new FormData();
 
     if (payload.upload_id) {
@@ -274,12 +299,21 @@ export const mediaService = {
       type: payload.file.type,
     });
 
+    if (payload.file.duration) {
+      formData.append("duration", String(payload.file.duration));
+    }
+
+    if (formData._parts) {
+      console.log("[UploadService] FormData contents:", formData._parts);
+    }
+
     return apiRequest(ENDPOINTS.media.upload, {
       method: "POST",
       token,
       body: formData,
       signal: options.signal,
     }).then((response) => {
+      console.log("[UploadService] Standard upload response:", response);
       clearMediaListCache();
       options.onProgress?.({
         mode: "standard",

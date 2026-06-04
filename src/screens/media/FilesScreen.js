@@ -1,19 +1,27 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  FlatList,
+  Alert,
   InteractionManager,
+  Linking,
   Modal,
   Platform,
+  Share,
   StyleSheet,
   Text,
   TextInput,
   TouchableOpacity,
   View,
+  useWindowDimensions,
 } from "react-native";
+import VideoThumbnail from "../../components/media/VideoThumbnail";
+import CachedImage from "../../components/media/CachedImage";
+import { FlashList } from "@shopify/flash-list";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import ThemedAvatar from "../../components/common/ThemedAvatar";
 import FileViewer from "../../components/media/FileViewer";
+import ImageViewer from "../../components/media/ImageViewer";
+import VideoFullScreenViewer from "../../components/media/VideoFullScreenViewer";
 import AppHeader from "../../components/navigation/AppHeader";
 import {
   FileChip,
@@ -24,10 +32,13 @@ import {
   softShadow,
   ui,
 } from "../../components/media/MediaDesign";
+import { borderRadius, spacing, typography } from "../../theme/designSystem";
+import { moderateScale } from "../../theme/responsive";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { resolveMediaUri } from "../../services/api";
 import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
+import { getOrCreateVideoThumbnailUri } from "../../utils/videoThumbnails";
 
 const getFileItemKey = (item, index) => {
   const stablePart =
@@ -43,6 +54,41 @@ const getFileItemKey = (item, index) => {
 
 const firstValue = (...values) => values.find((value) => Boolean(value));
 
+const getFileExtension = (value) => {
+  const stringValue = String(value || "").split("?")[0].toLowerCase();
+  const match = stringValue.match(/\.([^.\/]+)$/);
+  return match ? match[1] : "";
+};
+
+const getContentType = (item) =>
+  String(item?.content_type || item?.mime_type || item?.mimeType || item?.type || "").toLowerCase();
+
+const isMediaCategory = (category) =>
+  typeof category === "string" && /(image|images|video|videos)/i.test(category);
+
+const isImageExtension = (value) => {
+  const extension = getFileExtension(value);
+  return ["jpg", "jpeg", "png", "gif", "webp", "heic", "heif", "bmp", "tiff", "svg"].includes(extension);
+};
+
+const isVideoExtension = (value) => {
+  const extension = getFileExtension(value);
+  return ["mp4", "mov", "avi", "mkv", "webm", "3gp", "flv", "mts", "m4v"].includes(extension);
+};
+
+const getFileOpenCategory = (item) => {
+  const fileName = String(item?.original_file_name || item?.stored_file_name || item?.file_path || item?.path || "");
+  const contentType = getContentType(item);
+  const extension = getFileExtension(fileName || getFileUri(item));
+
+  if (contentType.startsWith("image/") || isImageExtension(fileName)) return "image";
+  if (contentType.startsWith("video/") || isVideoExtension(fileName)) return "video";
+  if (extension === "pdf" || contentType.includes("pdf")) return "pdf";
+  if (extension === "txt" || contentType.includes("text/plain")) return "txt";
+  if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(extension)) return "office";
+  return "external";
+};
+
 const getFileUri = (item) => {
   const serverPath = firstValue(
     item?.file_url,
@@ -53,10 +99,24 @@ const getFileUri = (item) => {
     item?.download_url,
     item?.downloadUrl,
     item?.file_path,
-    item?.path
+    item?.path,
+    item?.preview_url,
+    item?.previewUrl,
+    item?.preview_uri
   );
 
-  return serverPath ? resolveMediaUri(serverPath) : item?.previewUri || item?.uri || null;
+  return serverPath
+    ? resolveMediaUri(serverPath)
+    : firstValue(
+        item?.previewUri,
+        item?.preview_url,
+        item?.previewUrl,
+        item?.uri,
+        item?.local_uri,
+        item?.localUri,
+        item?.file_path,
+        item?.path
+      ) || null;
 };
 
 const getMediaChildId = (item) =>
@@ -65,6 +125,27 @@ const getMediaChildId = (item) =>
   item?.child_profile_id ??
   item?.childProfileId ??
   null;
+
+const isFileUpload = (item) => {
+  const contentType = getContentType(item);
+  const fileName = String(
+    item?.original_file_name || item?.stored_file_name || item?.file_path || item?.path || item?.uri || ""
+  );
+
+  if (isMediaCategory(item?.category)) {
+    return false;
+  }
+
+  if (contentType.startsWith("image/") || contentType.startsWith("video/")) {
+    return false;
+  }
+
+  if (isImageExtension(fileName) || isVideoExtension(fileName)) {
+    return false;
+  }
+
+  return true;
+};
 
 const getItemDate = (item) => {
   const date = new Date(item?.created_at || item?.createdAt || Date.now());
@@ -99,16 +180,35 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
     isChildAccount,
     moveMediaToRecycleBin,
   } = useProfile();
+  const renderCounter = useRef(0);
+  renderCounter.current += 1;
+
+  useEffect(() => {
+    console.log("[Perf] FilesScreen mount", {
+      renderCount: renderCounter.current,
+      mediaItemsCount: mediaItems.length,
+      selectedChildId,
+    });
+    return () => console.log("[Perf] FilesScreen unmount");
+  }, []);
+
   const { theme } = useTheme();
+  const { width: windowWidth } = useWindowDimensions();
   const [searchQuery, setSearchQuery] = useState("");
+  const [isGridView, setIsGridView] = useState(true);
   const [filterVisible, setFilterVisible] = useState(false);
   const [datePickerTarget, setDatePickerTarget] = useState(null);
   const [startDate, setStartDate] = useState(null);
   const [endDate, setEndDate] = useState(null);
-  const [isGridView, setIsGridView] = useState(true);
   const [isDateReversed, setIsDateReversed] = useState(false);
   const [selectedFile, setSelectedFile] = useState(null);
+  const [selectedImageFile, setSelectedImageFile] = useState(null);
+  const [selectedVideoFile, setSelectedVideoFile] = useState(null);
+  const [selectedVideoThumbnailUri, setSelectedVideoThumbnailUri] = useState(null);
   const [sceneReady, setSceneReady] = useState(false);
+
+  const isTablet = windowWidth >= 768;
+  const numColumns = isTablet ? 4 : 2;
 
   useEffect(() => {
     setSceneReady(false);
@@ -119,26 +219,20 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
     return () => task.cancel();
   }, []);
 
-  const files = useMemo(
-    () =>
-      (sceneReady ? mediaItems : [])
-        .filter(
-          (item) => {
-            if (!isChildAccount || !selectedChildId) {
-              return true;
-            }
-
-            const itemChildId = getMediaChildId(item);
-            return itemChildId !== null && String(itemChildId) === String(selectedChildId);
+  const files = useMemo(() => {
+    console.time("[Perf] Files filteredFiles");
+    const result = (sceneReady ? mediaItems : [])
+      .filter((item) => isFileUpload(item))
+      .filter(
+        (item) => {
+          if (!isChildAccount || !selectedChildId) {
+            return true;
           }
-        )
-        .filter(
-          (item) =>
-            item.category !== "images" &&
-            item.category !== "videos" &&
-            !item.content_type?.startsWith("image/") &&
-            !item.content_type?.startsWith("video/")
-        )
+
+          const itemChildId = getMediaChildId(item);
+          return itemChildId !== null && String(itemChildId) === String(selectedChildId);
+        }
+      )
         .filter((item) => {
           const itemDate = getItemDate(item);
           const isAfterStart = startDate ? itemDate >= getStartOfDay(startDate) : true;
@@ -154,11 +248,16 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
           isDateReversed
             ? getItemDate(firstItem) - getItemDate(secondItem)
             : getItemDate(secondItem) - getItemDate(firstItem)
-        ),
-    [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]
-  );
+        );
+    console.timeEnd("[Perf] Files filteredFiles");
+    return result;
+  }, [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]);
 
-  const hasActiveFilters = Boolean(startDate || endDate || isGridView || isDateReversed);
+  const recentFiles = useMemo(() => {
+    return files.slice(0, 5);
+  }, [files]);
+
+  const hasActiveFilters = Boolean(startDate || endDate || isDateReversed);
 
   const handleDateChange = (_, selectedDate) => {
     if (Platform.OS === "android") {
@@ -189,58 +288,142 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
     setIsDateReversed(false);
   };
 
-  const renderFileItem = ({ item, index }) => {
-    const fileName = item.original_file_name || item.stored_file_name || "Document";
+  const getFileTitle = useCallback(
+    (item) => item?.original_file_name || item?.stored_file_name || "Document",
+    []
+  );
 
-    if (isGridView) {
-      return (
-        <TouchableOpacity
-          style={[
-            styles.fileGridCard,
-            (index + 1) % 3 !== 0 && styles.fileGridCardGap,
-            softShadow,
-            { backgroundColor: theme.card },
-          ]}
-          onPress={() => setSelectedFile(item)}
-          activeOpacity={0.86}
-        >
-          <FileChip compact name={fileName} type={item.content_type} />
-          <Text style={[styles.fileName, { color: theme.text }]} numberOfLines={2}>
-            {getFriendlyTitle(item, "Document")}
-          </Text>
-          <Text style={[styles.fileMeta, { color: theme.subText }]} numberOfLines={1}>
-            {getReadableSize(item) || formatShortDate(getItemDate(item))}
-          </Text>
-        </TouchableOpacity>
-      );
+  const handleShareFile = useCallback(async (item) => {
+    const fileUri = getFileUri(item);
+
+    if (!fileUri) {
+      Alert.alert("Share unavailable", "This file link is missing.");
+      return;
     }
 
-    return (
-      <TouchableOpacity
-        style={[styles.fileCard, softShadow, { backgroundColor: theme.card }]}
-        onPress={() => setSelectedFile(item)}
-        activeOpacity={0.86}
-      >
-        <View style={styles.fileLeft}>
-          <View style={[styles.iconBox, { backgroundColor: getFileTone(fileName, item.content_type).bg }]}>
-            <Ionicons
-              name={getFileTone(fileName, item.content_type).icon}
-              size={18}
-              color={getFileTone(fileName, item.content_type).color}
-            />
+    try {
+      await Share.share({
+        title: getFileTitle(item),
+        message: fileUri,
+        url: Platform.OS === "ios" ? fileUri : undefined,
+      });
+    } catch {
+      Alert.alert("Share unavailable", "This file could not be shared right now.");
+    }
+  }, [getFileTitle]);
+
+  const confirmDeleteFile = useCallback((item) => {
+    if (!canManageMedia) {
+      return;
+    }
+
+    Alert.alert("Move to Recycle Bin", "This file will be moved to Recycle Bin.", [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Move",
+        style: "destructive",
+        onPress: () => moveMediaToRecycleBin(item),
+      },
+    ]);
+  }, [canManageMedia, moveMediaToRecycleBin]);
+
+  const showFileActions = useCallback((item) => {
+    const actions = [
+      { text: "Share", onPress: () => handleShareFile(item) },
+      { text: "Cancel", style: "cancel" },
+    ];
+
+    if (canManageMedia) {
+      actions.splice(1, 0, {
+        text: "Delete",
+        style: "destructive",
+        onPress: () => confirmDeleteFile(item),
+      });
+    }
+
+    Alert.alert(getFileTitle(item), "File actions", actions);
+  }, [canManageMedia, confirmDeleteFile, getFileTitle, handleShareFile]);
+
+  const openExternalFile = useCallback(async (item) => {
+    const fileUri = getFileUri(item);
+
+    if (!fileUri) {
+      Alert.alert("Open unavailable", "This file link is missing.");
+      return;
+    }
+
+    try {
+      await Linking.openURL(fileUri);
+    } catch {
+      Alert.alert("Open unavailable", "This file cannot be opened on this device.");
+    }
+  }, []);
+
+  const openFileDirectly = useCallback(async (item) => {
+    const openCategory = getFileOpenCategory(item);
+
+    if (openCategory === "image") {
+      setSelectedImageFile(item);
+      return;
+    }
+
+    if (openCategory === "video") {
+      setSelectedVideoFile(item);
+      setSelectedVideoThumbnailUri(null);
+      const thumbnailUri = await getOrCreateVideoThumbnailUri(item, getFileUri(item));
+      setSelectedVideoThumbnailUri(thumbnailUri);
+      return;
+    }
+
+    if (openCategory === "pdf" || openCategory === "txt") {
+      setSelectedFile(item);
+      return;
+    }
+
+    await openExternalFile(item);
+  }, [openExternalFile]);
+
+  const renderFileItem = useCallback(
+    ({ item, index }) => {
+      const fileName = item.original_file_name || item.stored_file_name || "Document";
+      const contentType = getContentType(item);
+      const isImage = contentType.startsWith("image/") || isImageExtension(fileName);
+      const isVideo = contentType.startsWith("video/") || isVideoExtension(fileName);
+
+      return (
+        <TouchableOpacity
+          style={[styles.fileGridCard, softShadow, { backgroundColor: theme.card }]}
+          onPress={() => openFileDirectly(item)}
+          onLongPress={() => showFileActions(item)}
+          activeOpacity={0.86}
+        >
+          <View style={styles.cardPreview}>
+            {isImage ? (
+              <CachedImage source={{ uri: getFileUri(item) }} style={styles.previewContent} resizeMode="cover" />
+            ) : isVideo ? (
+              <VideoThumbnail item={item} style={styles.previewContent} small />
+            ) : (
+              <View style={[styles.iconLarge, { backgroundColor: getFileTone(fileName, contentType).bg }]}>
+                <Ionicons
+                  name={getFileTone(fileName, contentType).icon}
+                  size={42}
+                  color={getFileTone(fileName, contentType).color}
+                />
+              </View>
+            )}
           </View>
-          <View style={styles.fileText}>
+          <View style={styles.cardInfo}>
             <Text style={[styles.fileName, { color: theme.text }]} numberOfLines={1}>
-              {getFriendlyTitle(item, "Document")}
+              {getFriendlyTitle(item, "File")}
             </Text>
-            <Text style={[styles.fileMeta, { color: theme.subText }]}>
-              {getReadableSize(item) || item.content_type || "file"} - {formatShortDate(getItemDate(item))}
+            <Text style={[styles.fileMeta, { color: theme.subText }]} numberOfLines={1}>
+              {getReadableSize(item)} • {formatShortDate(getItemDate(item))}
             </Text>
           </View>
-        </View>
       </TouchableOpacity>
     );
-  };
+    }, [openFileDirectly, showFileActions, theme]
+  );
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -263,13 +446,15 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
         active={hasActiveFilters}
       />
 
-      <FlatList
+      <FlashList
         data={files}
         keyExtractor={getFileItemKey}
         key={isGridView ? "files-grid" : "files-list"}
         numColumns={isGridView ? 3 : 1}
         columnWrapperStyle={isGridView ? styles.gridRow : null}
         contentContainerStyle={styles.listContent}
+        estimatedItemSize={160}
+        removeClippedSubviews
         renderItem={renderFileItem}
         ListEmptyComponent={
           !sceneReady ? null :
@@ -342,24 +527,6 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
               </TouchableOpacity>
             </View>
 
-            <Text style={[styles.filterLabel, { color: theme.subText }]}>View</Text>
-            <View style={[styles.segmentedControl, { backgroundColor: theme.card }]}>
-              <TouchableOpacity
-                style={[styles.segmentButton, !isGridView && { backgroundColor: theme.primary }]}
-                onPress={() => setIsGridView(false)}
-              >
-                <Ionicons name="list" size={18} color={!isGridView ? theme.buttonText : theme.subText} />
-                <Text style={[styles.segmentText, { color: !isGridView ? theme.buttonText : theme.subText }]}>List</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.segmentButton, isGridView && { backgroundColor: theme.primary }]}
-                onPress={() => setIsGridView(true)}
-              >
-                <Ionicons name="grid" size={18} color={isGridView ? theme.buttonText : theme.subText} />
-                <Text style={[styles.segmentText, { color: isGridView ? theme.buttonText : theme.subText }]}>Grid</Text>
-              </TouchableOpacity>
-            </View>
-
             <View style={styles.filterActions}>
               <TouchableOpacity style={[styles.clearButton, { borderColor: theme.border }]} onPress={clearFilters}>
                 <Text style={[styles.clearButtonText, { color: theme.text }]}>Clear all</Text>
@@ -378,7 +545,33 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
         onClose={() => setSelectedFile(null)}
         onDelete={canManageMedia ? moveMediaToRecycleBin : null}
         getFileUri={getFileUri}
-        getFileTitle={(item) => item?.original_file_name || item?.stored_file_name || "Document"}
+        getFileTitle={getFileTitle}
+      />
+
+      <ImageViewer
+        images={selectedImageFile ? [selectedImageFile] : []}
+        initialIndex={0}
+        visible={Boolean(selectedImageFile)}
+        onClose={() => setSelectedImageFile(null)}
+        onDelete={canManageMedia ? moveMediaToRecycleBin : null}
+        getImageUri={getFileUri}
+        getImageTitle={getFileTitle}
+      />
+
+      <VideoFullScreenViewer
+        visible={Boolean(selectedVideoFile)}
+        sourceUri={selectedVideoFile ? getFileUri(selectedVideoFile) : null}
+        thumbnailUri={selectedVideoThumbnailUri}
+        canDelete={canManageMedia}
+        onClose={() => {
+          setSelectedVideoFile(null);
+          setSelectedVideoThumbnailUri(null);
+        }}
+        onDelete={() => {
+          if (selectedVideoFile) {
+            confirmDeleteFile(selectedVideoFile);
+          }
+        }}
       />
     </View>
   );
@@ -422,64 +615,91 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     borderWidth: 1,
   },
-  listContent: {
-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
-    paddingBottom: 28,
+  scrollContent: {
+    paddingBottom: 100,
+    paddingHorizontal: spacing.md,
   },
-  gridRow: {
-    justifyContent: "flex-start",
+  headerContainer: {
+    paddingTop: spacing.sm,
   },
-  fileCard: {
-    backgroundColor: "#fff",
-    borderRadius: 10,
-    padding: 12,
-    marginBottom: 10,
+  section: {
+    marginVertical: spacing.md,
+  },
+  sectionTitle: {
+    fontSize: typography.label,
+    fontWeight: "800",
+    marginBottom: spacing.sm,
+    marginLeft: spacing.xs,
+  },
+  recentScroll: {
+    paddingLeft: spacing.xs,
+    gap: spacing.sm,
+  },
+  recentCard: {
+    width: moderateScale(110),
+    padding: spacing.sm,
+    borderRadius: borderRadius.lg,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  recentIconWrap: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "#F3F0FF",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.xs,
+  },
+  recentName: {
+    fontSize: 11,
+    fontWeight: "700",
+    textAlign: "center",
+  },
+  allFilesHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginTop: spacing.sm,
+    marginBottom: spacing.xs,
+  },
+  fileCount: {
+    fontSize: 12,
+    fontWeight: "600",
   },
   fileGridCard: {
-    width: "31.5%",
-    minHeight: 116,
-    backgroundColor: "#fff",
-    borderRadius: 8,
-    padding: 10,
-    marginBottom: 10,
-    justifyContent: "space-between",
-  },
-  fileGridCardGap: {
-    marginRight: "2.75%",
-  },
-  fileLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  iconBox: {
-    width: 34,
-    height: 34,
-    borderRadius: 8,
-    alignItems: "center",
-    justifyContent: "center",
-    marginRight: 10,
-  },
-  gridIconBox: {
-    width: 48,
-    height: 48,
-    borderRadius: 14,
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: 14,
-  },
-  fileText: {
     flex: 1,
+    margin: spacing.xs,
+    borderRadius: moderateScale(16),
+    overflow: "hidden",
+  },
+  cardPreview: {
+    height: moderateScale(100),
+    backgroundColor: "#F9FAFB",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  previewContent: {
+    width: "100%",
+    height: "100%",
+  },
+  iconLarge: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cardInfo: {
+    padding: spacing.sm,
   },
   fileName: {
-    fontWeight: "800",
-    color: "#111827",
-    fontSize: 11,
+    fontSize: 12,
+    fontWeight: "700",
   },
   fileMeta: {
-    marginTop: 3,
-    color: "#6B7280",
+    marginTop: 2,
     fontSize: 10,
-    fontWeight: "700",
+    fontWeight: "500",
   },
   emptyState: {
     backgroundColor: "#fff",

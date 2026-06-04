@@ -1,6 +1,7 @@
-import React from "react";
+import React, { useEffect, useMemo } from "react";
 import { StyleSheet, View, Text } from "react-native";
-import { VideoView } from "expo-video";
+import { useVideoPlayer, VideoView } from "expo-video";
+import { getVideoSource } from "../../utils/media";
 
 const VideoPlayer = ({
   source,
@@ -21,36 +22,49 @@ const VideoPlayer = ({
   // other props
   ...rest
 }) => {
-  const videoSourceUri =
-    typeof source === "string"
-      ? source
-      : source?.uri;
+  const videoSource = useMemo(() => getVideoSource(source), [source]);
 
-  if (!videoSourceUri) {
-    return (
-      <View style={[styles.video, style, styles.errorContainer]}>
-        <Text style={styles.errorText}>
-          Invalid video source
-        </Text>
-      </View>
-    );
-  }
+  // Diagnostic Logs
+  console.log("VIDEO SOURCE:", source);
+  console.log("RESOLVED VIDEO SOURCE:", videoSource);
+  console.log("SOURCE URI:", videoSource?.uri || videoSource);
+  console.log("PLAYBACK URI:", videoSource?.uri || videoSource);
+  console.log("CACHE LOADING:", false);
+
+  const player = useVideoPlayer(videoSource, (p) => {
+    if (shouldPlay) {
+      p.play();
+    }
+    p.loop = true;
+  });
+
+  useEffect(() => {
+    if (shouldPlay) {
+      player.play();
+    } else {
+      player.pause();
+    }
+  }, [player, shouldPlay]);
+
+  useEffect(() => {
+    const statusSubscription = player.addListener?.("statusChange", ({ status, error }) => {
+      console.log("PLAYER STATUS:", status);
+      if (error) console.log("PLAYER ERROR:", error);
+      
+      if (status === "readyToPlay" && shouldPlay) {
+        player.play();
+      }
+    });
+    return () => statusSubscription?.remove?.();
+  }, [player, shouldPlay]);
 
   return (
     <VideoView
-      source={videoSourceUri}
+      player={player}
       style={[styles.video, style]}
-
-      shouldPlay={shouldPlay}
       nativeControls={nativeControls}
-
       contentFit={contentFit}
       surfaceType={surfaceType}
-
-      posterSource={posterSource}
-
-      onFirstFrameRender={onFirstFrameRender}
-
       {...rest}
     />
   );
@@ -59,17 +73,8 @@ const VideoPlayer = ({
 const styles = StyleSheet.create({
   video: {
     width: "100%",
-    height: 200,
+    height: "100%",
     backgroundColor: "#000",
-  },
-
-  errorContainer: {
-    justifyContent: "center",
-    alignItems: "center",
-  },
-
-  errorText: {
-    color: "#fff",
   },
 });
 

@@ -1,0 +1,826 @@
+diff --git a/src/screens/media/GalleryScreen.js b/src/screens/media/GalleryScreen.js
+index af00a5c..b2dd4ad 100644
+--- a/src/screens/media/GalleryScreen.js
++++ b/src/screens/media/GalleryScreen.js
+@@ -1,9 +1,8 @@
+-import React, { useCallback, useEffect, useMemo, useState } from "react";
++import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+ import {
+   ActivityIndicator,
+   Alert,
+   BackHandler,
+-  FlatList,
+   InteractionManager,
+   Platform,
+   StyleSheet,
+@@ -14,6 +13,7 @@ import {
+   Modal,
+   useWindowDimensions,
+ } from "react-native";
++import { FlashList } from "@shopify/flash-list";
+ import DateTimePicker from "@react-native-community/datetimepicker";
+ import { Ionicons } from "@expo/vector-icons";
+ import { useFocusEffect } from "@react-navigation/native";
+@@ -40,7 +40,8 @@ import {
+ } from "../../components/media/MediaDesign";
+ import { useProfile } from "../../context/ProfileContext";
+ import { useTheme } from "../../context/ThemeContext";
+-import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
++import { borderRadius, layout, spacing, typography } from "../../theme/designSystem";
++import { moderateScale } from "../../theme/responsive";
+ import { getMediaUri, getVideoThumbnailUri } from "../../utils/media";
+ 
+ const GRID_COLUMNS = 3;
+@@ -144,6 +145,17 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
+     loadChildMedia,
+     moveMediaToRecycleBin,
+   } = useProfile();
++  const renderCounter = useRef(0);
++  renderCounter.current += 1;
++
++  useEffect(() => {
++    console.log("[Perf] GalleryScreen mount", {
++      renderCount: renderCounter.current,
++      mediaItemsCount: mediaItems.length,
++      selectedChildId,
++    });
++    return () => console.log("[Perf] GalleryScreen unmount");
++  }, []);
+   const { theme } = useTheme();
+   const { width: windowWidth } = useWindowDimensions();
+   const [searchQuery, setSearchQuery] = useState("");
+@@ -187,33 +199,35 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
+     });
+   }, [isChildAccount, mediaItems, sceneReady, selectedChildId]);
+ 
+-  const filteredMediaItems = useMemo(
+-    () =>
+-      scopedMediaItems
+-        .filter((item) => {
+-          const itemDate = getItemDate(item);
+-          const isAfterStart = startDate ? itemDate >= getStartOfDay(startDate) : true;
+-          const isBeforeEnd = endDate ? itemDate <= getEndOfDay(endDate) : true;
+-          return isAfterStart && isBeforeEnd;
+-        })
+-        .filter((item) => {
+-          if (mediaType === "all") return true;
+-          return getNormalizedCategory(item) === mediaType;
+-        })
+-        .filter((item) =>
+-          (item.original_file_name || item.stored_file_name || "")
+-            .toLowerCase()
+-            .includes(searchQuery.toLowerCase())
+-        )
+-        .sort((firstItem, secondItem) =>
+-          isDateReversed
+-            ? getItemDate(firstItem) - getItemDate(secondItem)
+-            : getItemDate(secondItem) - getItemDate(firstItem)
+-        ),
+-    [endDate, mediaType, scopedMediaItems, searchQuery, startDate, isDateReversed]
+-  );
++  const filteredMediaItems = useMemo(() => {
++    console.time("[Perf] Gallery filteredMediaItems");
++    const result = scopedMediaItems
++      .filter((item) => {
++        const itemDate = getItemDate(item);
++        const isAfterStart = startDate ? itemDate >= getStartOfDay(startDate) : true;
++        const isBeforeEnd = endDate ? itemDate <= getEndOfDay(endDate) : true;
++        return isAfterStart && isBeforeEnd;
++      })
++      .filter((item) => {
++        if (mediaType === "all") return true;
++        return getNormalizedCategory(item) === mediaType;
++      })
++      .filter((item) =>
++        (item.original_file_name || item.stored_file_name || "")
++          .toLowerCase()
++          .includes(searchQuery.toLowerCase())
++      )
++      .sort((firstItem, secondItem) =>
++        isDateReversed
++          ? getItemDate(firstItem) - getItemDate(secondItem)
++          : getItemDate(secondItem) - getItemDate(firstItem)
++      );
++    console.timeEnd("[Perf] Gallery filteredMediaItems");
++    return result;
++  }, [endDate, mediaType, scopedMediaItems, searchQuery, startDate, isDateReversed]);
+ 
+   const groupedMedia = useMemo(() => {
++    console.time("[Perf] Gallery groupedMedia");
+     const groups = {};
+ 
+     filteredMediaItems.forEach((item) => {
+@@ -242,11 +256,13 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
+       };
+     });
+ 
+-    return grouped.sort((firstGroup, secondGroup) =>
++    const result = grouped.sort((firstGroup, secondGroup) =>
+       isDateReversed
+         ? firstGroup.date - secondGroup.date
+         : secondGroup.date - firstGroup.date
+     );
++    console.timeEnd("[Perf] Gallery groupedMedia");
++    return result;
+   }, [filteredMediaItems, isDateReversed]);
+ 
+   const stats = useMemo(() => {
+@@ -272,12 +288,123 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
+   const mediaTileSize = useMemo(
+     () =>
+       (windowWidth -
+-        SCREEN_HORIZONTAL_PADDING * 2 -
++        layout.screenPadding * 2 -
+         GRID_GAP * (GRID_COLUMNS - 1)) /
+       GRID_COLUMNS,
+     [windowWidth]
+   );
+ 
++  const galleryListItems = useMemo(() => {
++    console.time("[Perf] Gallery galleryListItems");
++    const items = [];
++
++    groupedMedia.forEach((group) => {
++      items.push({
++        type: "header",
++        key: `group-header-${group.title}`,
++        title: group.title,
++        date: group.date,
++        count: group.items.length,
++      });
++
++      group.items.forEach((item, itemIndex) => {
++        items.push({
++          type: "media",
++          key: getMediaItemKey(item, itemIndex, group.title),
++          item,
++          itemIndex,
++          groupTitle: group.title,
++        });
++      });
++    });
++
++    const result = items;
++    console.timeEnd("[Perf] Gallery galleryListItems");
++    return result;
++  }, [groupedMedia]);
++
++  const handleMediaPress = useCallback(
++    (item) => {
++      const category = getNormalizedCategory(item);
++      if (category === "images") {
++        openViewer(item);
++      } else if (category === "videos") {
++        openVideoViewer(item);
++      } else {
++        navigation.navigate("Files");
++      }
++    },
++    [navigation, openViewer, openVideoViewer]
++  );
++
++  const renderGalleryItem = useCallback(
++    ({ item }) => {
++      if (item.type === "header") {
++        return (
++          <FadeInView style={styles.group} delay={0}>
++            <View style={styles.groupHeader}>
++              <View style={styles.groupTitleWrap}>
++                <Ionicons name="calendar-outline" size={13} color={theme.primary} />
++                <Text style={[styles.groupTitle, { color: theme.text }]}>{item.title}</Text>
++                <Text style={[styles.groupDate, { color: theme.subText }]}>
++                  {formatShortDate(item.date)}
++                </Text>
++              </View>
++              <Ionicons name="chevron-down" size={16} color={theme.primary} />
++            </View>
++          </FadeInView>
++        );
++      }
++
++      return (
++        <TouchableOpacity
++          activeOpacity={0.88}
++          style={[
++            styles.mediaTile,
++            {
++              width: mediaTileSize,
++              height: mediaTileSize,
++              marginRight:
++                (item.itemIndex + 1) % GRID_COLUMNS === 0 ? 0 : GRID_GAP,
++              marginBottom: GRID_GAP,
++            },
++          ]}
++          onPress={() => handleMediaPress(item.item)}
++        >
++          <View style={styles.mediaTileContent}>
++            {getNormalizedCategory(item.item) === "images" && (
++              <CachedImage source={{ uri: getMediaUri(item.item) }} style={styles.mediaPreview} />
++            )}
++            {getNormalizedCategory(item.item) === "videos" && (
++              <>
++                <VideoThumbnail item={item.item} style={styles.mediaPreview} />
++                <PlayButton small />
++              </>
++            )}
++            {getNormalizedCategory(item.item) === "files" && (
++              <FileChip
++                compact={false}
++                name={item.item.original_file_name || item.item.stored_file_name || "Document"}
++                type={item.item.content_type}
++                size={getReadableSize(item.item)}
++              />
++            )}
++            {getNormalizedCategory(item.item) !== "files" ? (
++              <MediaBadge icon={getNormalizedCategory(item.item) === "videos" ? "time-outline" : "image-outline"}>
++                {getNormalizedCategory(item.item) === "videos"
++                  ? formatDuration(item.item.duration)
++                  : ""}
++              </MediaBadge>
++            ) : null}
++          </View>
++        </TouchableOpacity>
++      );
++    },
++    [handleMediaPress, mediaTileSize, theme]
++  );
++
++  const getGalleryListKey = useCallback((item) => item.key, []);
++
+   const hasActiveFilters = Boolean(startDate || endDate || !isGridView || isDateReversed);
+ 
+   useFocusEffect(
+@@ -315,20 +442,23 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
+     }, [isChildAccount, loadChildMedia, selectedChildId])
+   );
+ 
+-  const openViewer = (item) => {
+-    const itemId = getMediaItemId(item);
+-    const index = imageItems.findIndex((currentItem) => getMediaItemId(currentItem) === itemId);
+-    setViewerIndex(index >= 0 ? index : 0);
+-    setViewerVisible(true);
+-  };
++  const openViewer = useCallback(
++    (item) => {
++      const itemId = getMediaItemId(item);
++      const index = imageItems.findIndex((currentItem) => getMediaItemId(currentItem) === itemId);
++      setViewerIndex(index >= 0 ? index : 0);
++      setViewerVisible(true);
++    },
++    [imageItems]
++  );
+ 
+-  const openVideoViewer = (item) => {
++  const openVideoViewer = useCallback((item) => {
+     setHasVideoFirstFrame(false);
+     setShowVideoCover(true);
+     setCurrentVideoThumbnailUri(getVideoThumbnailUri(item));
+     setCurrentVideoUri(getMediaUri(item));
+     setVideoViewerVisible(true);
+-  };
++  }, []);
+ 
+   const closeVideoViewer = useCallback(() => {
+     setVideoViewerVisible(false);
+@@ -441,14 +571,16 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
+         }
+       />
+ 
+-      <FlatList
+-        data={groupedMedia}
+-        keyExtractor={getMediaGroupKey}
++      <FlashList
++        data={galleryListItems}
++        keyExtractor={getGalleryListKey}
+         showsVerticalScrollIndicator={false}
+         contentContainerStyle={styles.scrollContent}
+         initialNumToRender={4}
+         maxToRenderPerBatch={5}
+         windowSize={7}
++        estimatedItemSize={180}
++        removeClippedSubviews
+         ListHeaderComponent={
+           <>
+             <SearchFilterBar
+@@ -471,12 +603,13 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
+                   </TouchableOpacity>
+                 </View>
+ 
+-                <FlatList
++                <FlashList
+                   data={highlightItems}
+                   horizontal
+                   showsHorizontalScrollIndicator={false}
+                   keyExtractor={(item, index) => getMediaItemKey(item, index, "highlight")}
+                   contentContainerStyle={styles.highlightsContent}
++                  estimatedItemSize={96}
+                   renderItem={({ item }) => (
+                     <ImageTile
+                       uri={getMediaUri(item)}
+@@ -498,125 +631,8 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
+ 
+           </>
+         }
+-        renderItem={({ item: group, index }) => (
+-          <FadeInView style={styles.group} delay={Math.min(index * 35, 160)}>
+-            <View style={styles.groupHeader}>
+-              <View style={styles.groupTitleWrap}>
+-                <Ionicons name="calendar-outline" size={13} color={theme.primary} />
+-                <Text style={[styles.groupTitle, { color: theme.text }]}>{group.title}</Text>
+-                <Text style={[styles.groupDate, { color: theme.subText }]}>
+-                  {formatShortDate(group.date)}
+-                </Text>
+-              </View>
+-              <Ionicons name="chevron-down" size={16} color={theme.primary} />
+-            </View>
+-            {isGridView ? (
+-              <FlatList
+-                data={group.items}
+-                keyExtractor={(item, itemIndex) => getMediaItemKey(item, itemIndex, `${group.title}-${index}`)}
+-                numColumns={GRID_COLUMNS}
+-                scrollEnabled={false}
+-                columnWrapperStyle={styles.gridRow}
+-                renderItem={({ item, index: itemIndex }) => (
+-                  <TouchableOpacity
+-                    activeOpacity={0.88}
+-                    style={[
+-                      styles.mediaTile,
+-                      {
+-                        width: mediaTileSize,
+-                        height: mediaTileSize,
+-                        marginRight:
+-                          (itemIndex + 1) % GRID_COLUMNS === 0 ? 0 : GRID_GAP,
+-                        marginBottom: GRID_GAP,
+-                      },
+-                    ]}
+-                    onPress={() => {
+-                      const category = getNormalizedCategory(item);
+-                      if (category === "images") {
+-                        openViewer(item);
+-                      } else if (category === "videos") {
+-                        openVideoViewer(item);
+-                      } else if (category === "files") {
+-                        navigation.navigate("Files");
+-                      }
+-                    }}
+-                  >
+-                    <View style={styles.mediaTileContent}>
+-                      {getNormalizedCategory(item) === "images" && (
+-                        <CachedImage source={{ uri: getMediaUri(item) }} style={styles.mediaPreview} />
+-                      )}
+-                      {getNormalizedCategory(item) === "videos" && (
+-                        <>
+-                          <VideoThumbnail item={item} style={styles.mediaPreview} />
+-                          <PlayButton small />
+-                        </>
+-                      )}
+-                      {getNormalizedCategory(item) === "files" && (
+-                        <FileChip
+-                          compact={false}
+-                          name={item.original_file_name || item.stored_file_name || "Document"}
+-                          type={item.content_type}
+-                          size={getReadableSize(item)}
+-                        />
+-                      )}
+-                      {getNormalizedCategory(item) !== "files" ? (
+-                        <MediaBadge icon={getNormalizedCategory(item) === "videos" ? "time-outline" : "image-outline"}>
+-                          {getNormalizedCategory(item) === "videos"
+-                            ? formatDuration(item.duration)
+-                            : ""}
+-                        </MediaBadge>
+-                      ) : null}
+-                    </View>
+-                  </TouchableOpacity>
+-                )}
+-              />
+-            ) : (
+-              <View style={styles.mediaList}>
+-                {group.items.map((item, itemIndex) => {
+-                  const category = getNormalizedCategory(item);
+-                  return (
+-                    <TouchableOpacity
+-                      key={getMediaItemKey(item, itemIndex, `${group.title}-${index}-list`)}
+-                      style={[styles.mediaListItem, { backgroundColor: theme.card }]}
+-                      activeOpacity={0.88}
+-                      onPress={() => {
+-                        if (category === "images") {
+-                          openViewer(item);
+-                        } else if (category === "videos") {
+-                          openVideoViewer(item);
+-                        } else {
+-                          navigation.navigate("Files");
+-                        }
+-                      }}
+-                    >
+-                      <View style={styles.mediaListPreview}>
+-                        {category === "images" && (
+-                          <CachedImage source={{ uri: getMediaUri(item) }} style={styles.mediaPreview} />
+-                        )}
+-                        {category === "videos" && (
+-                          <VideoThumbnail item={item} style={styles.mediaPreview} />
+-                        )}
+-                        {category === "files" && (
+-                          <View style={[styles.mediaPreview, styles.mediaFallback]}>
+-                            <Ionicons name="document-text" size={22} color="#2563EB" />
+-                          </View>
+-                        )}
+-                      </View>
+-                      <View style={styles.mediaListText}>
+-                        <Text style={[styles.mediaListTitle, { color: theme.text }]} numberOfLines={1}>
+-                          {item.original_file_name || item.stored_file_name || "Media"}
+-                        </Text>
+-                        <Text style={[styles.mediaListMeta, { color: theme.subText }]}>
+-                          {category} GÇó {formatShortDate(getItemDate(item))}
+-                        </Text>
+-                      </View>
+-                    </TouchableOpacity>
+-                  );
+-                })}
+-              </View>
+-            )}
+-          </FadeInView>
+-        )}
++        renderItem={renderGalleryItem}
++
+         ListEmptyComponent={
+           !sceneReady || isMediaLoading ? (
+             <View style={[styles.emptyState, { backgroundColor: theme.card }]}>
+@@ -829,97 +845,97 @@ const styles = StyleSheet.create({
+     paddingBottom: 28,
+   },
+   avatar: {
+-    width: 34,
+-    height: 34,
+-    borderRadius: 17,
++    width: moderateScale(34),
++    height: moderateScale(34),
++    borderRadius: moderateScale(17),
+   },
+   statsRow: {
+     flexDirection: "row",
+-    gap: 10,
+-    marginHorizontal: SCREEN_HORIZONTAL_PADDING,
+-    marginTop: 16,
++    gap: spacing.sm,
++    marginHorizontal: layout.screenPadding,
++    marginTop: spacing.lg,
+   },
+   highlightsContent: {
+-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
+-    paddingBottom: 4,
++    paddingHorizontal: layout.screenPadding,
++    paddingBottom: spacing.xs,
+   },
+   toolbarRow: {
+     flexDirection: "row",
+     alignItems: "center",
+-    gap: 10,
+-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
+-    marginBottom: 16,
++    gap: spacing.sm,
++    paddingHorizontal: layout.screenPadding,
++    marginBottom: spacing.lg,
+   },
+   searchBox: {
+     flex: 1,
+-    minHeight: 46,
+-    borderRadius: 14,
++    minHeight: moderateScale(46),
++    borderRadius: borderRadius.lg,
+     borderWidth: 1,
+-    paddingHorizontal: 12,
++    paddingHorizontal: spacing.md,
+     flexDirection: "row",
+     alignItems: "center",
+   },
+   searchInput: {
+     flex: 1,
+-    marginLeft: 8,
++    marginLeft: spacing.sm,
+   },
+   filterButton: {
+-    width: 46,
+-    height: 46,
+-    borderRadius: 14,
++    width: moderateScale(46),
++    height: moderateScale(46),
++    borderRadius: borderRadius.lg,
+     borderWidth: 1,
+     alignItems: "center",
+     justifyContent: "center",
+   },
+   highlightCard: {
+-    width: 72,
+-    height: 72,
+-    marginRight: 10,
+-    borderRadius: 10,
++    width: moderateScale(72),
++    height: moderateScale(72),
++    marginRight: spacing.sm,
++    borderRadius: borderRadius.md,
+   },
+   statCard: {
+     flex: 1,
+     backgroundColor: "#fff",
+-    borderRadius: 16,
+-    paddingVertical: 16,
++    borderRadius: borderRadius.lg,
++    paddingVertical: spacing.md,
+     alignItems: "center",
+   },
+   statValue: {
+-    fontSize: 22,
++    fontSize: typography.heading,
+     fontWeight: "700",
+   },
+   statLabel: {
+-    marginTop: 4,
++    marginTop: spacing.xs,
+     color: "#6B7280",
+   },
+   sectionHeader: {
+-    marginTop: 4,
+-    marginBottom: 8,
+-    marginHorizontal: SCREEN_HORIZONTAL_PADDING,
++    marginTop: spacing.xs,
++    marginBottom: spacing.sm,
++    marginHorizontal: layout.screenPadding,
+     flexDirection: "row",
+     justifyContent: "space-between",
+     alignItems: "center",
+   },
+   sectionTitle: {
+-    fontSize: 12,
++    fontSize: typography.label,
+     fontWeight: "800",
+     color: "#111827",
+   },
+   sectionTitleRow: {
+     flexDirection: "row",
+     alignItems: "center",
+-    gap: 6,
++    gap: spacing.xs,
+   },
+   link: {
+     color: "#2563EB",
+     fontWeight: "600",
+   },
+   group: {
+-    marginBottom: 12,
++    marginBottom: spacing.md,
+   },
+   groupHeader: {
+-    marginHorizontal: SCREEN_HORIZONTAL_PADDING,
+-    marginBottom: 8,
++    marginHorizontal: layout.screenPadding,
++    marginBottom: spacing.sm,
+     flexDirection: "row",
+     alignItems: "center",
+     justifyContent: "space-between",
+@@ -927,47 +943,47 @@ const styles = StyleSheet.create({
+   groupTitleWrap: {
+     flexDirection: "row",
+     alignItems: "center",
+-    gap: 7,
++    gap: spacing.xs,
+   },
+   groupTitle: {
+     color: ui.ink,
+-    fontSize: 12,
++    fontSize: typography.label,
+     fontWeight: "800",
+   },
+   groupDate: {
+-    fontSize: 10,
++    fontSize: typography.caption,
+     fontWeight: "700",
+   },
+   gridRow: {
+     justifyContent: "flex-start",
+-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
++    paddingHorizontal: layout.screenPadding,
+   },
+   mediaTile: {
+-    borderRadius: 8,
++    borderRadius: borderRadius.sm,
+     overflow: "hidden",
+     backgroundColor: "#E9E7F5",
+   },
+   mediaList: {
+-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
++    paddingHorizontal: layout.screenPadding,
+   },
+   mediaListItem: {
+-    minHeight: 82,
+-    borderRadius: 15,
+-    padding: 10,
+-    marginBottom: 10,
++    minHeight: moderateScale(82),
++    borderRadius: borderRadius.lg,
++    padding: spacing.md,
++    marginBottom: spacing.sm,
+     flexDirection: "row",
+     alignItems: "center",
+   },
+   mediaListPreview: {
+-    width: 62,
+-    height: 62,
+-    borderRadius: 12,
++    width: moderateScale(62),
++    height: moderateScale(62),
++    borderRadius: borderRadius.md,
+     overflow: "hidden",
+     backgroundColor: "#E5E7EB",
+   },
+   mediaListText: {
+     flex: 1,
+-    marginLeft: 12,
++    marginLeft: spacing.md,
+   },
+   mediaListTitle: {
+     fontSize: 14,
+@@ -990,23 +1006,23 @@ const styles = StyleSheet.create({
+   },
+   emptyState: {
+     backgroundColor: "#fff",
+-    marginHorizontal: SCREEN_HORIZONTAL_PADDING,
+-    borderRadius: 20,
+-    padding: 24,
++    marginHorizontal: layout.screenPadding,
++    borderRadius: borderRadius.xl,
++    padding: spacing.lg,
+     alignItems: "center",
+-    marginTop: 12,
++    marginTop: spacing.sm,
+   },
+   emptyTitle: {
+-    marginTop: 12,
++    marginTop: spacing.sm,
+     fontWeight: "700",
+-    fontSize: 18,
++    fontSize: typography.title,
+     color: "#111827",
+   },
+   emptySubtitle: {
+-    marginTop: 8,
++    marginTop: spacing.sm,
+     color: "#6B7280",
+     textAlign: "center",
+-    lineHeight: 20,
++    lineHeight: typography.body * 1.25,
+   },
+   videoModalContainer: {
+     flex: 1,
+@@ -1026,21 +1042,21 @@ const styles = StyleSheet.create({
+   },
+   closeButton: {
+     position: "absolute",
+-    top: 40, // Adjust as needed for safe area
+-    right: 20,
++    top: moderateScale(40), // Adjust as needed for safe area
++    right: moderateScale(20),
+     zIndex: 1,
+     backgroundColor: "rgba(0,0,0,0.5)",
+-    borderRadius: 20,
+-    padding: 2,
++    borderRadius: moderateScale(20),
++    padding: moderateScale(2),
+   },
+   deleteButton: {
+     position: "absolute",
+-    top: 42,
+-    left: 20,
++    top: moderateScale(42),
++    left: moderateScale(20),
+     zIndex: 1,
+-    width: 38,
+-    height: 38,
+-    borderRadius: 19,
++    width: moderateScale(38),
++    height: moderateScale(38),
++    borderRadius: moderateScale(19),
+     backgroundColor: "rgba(0,0,0,0.5)",
+     alignItems: "center",
+     justifyContent: "center",
+@@ -1059,81 +1075,81 @@ const styles = StyleSheet.create({
+     backgroundColor: "rgba(0,0,0,0.42)",
+   },
+   filterPanel: {
+-    borderTopLeftRadius: 22,
+-    borderTopRightRadius: 22,
+-    paddingHorizontal: 20,
+-    paddingTop: 18,
+-    paddingBottom: 22,
++    borderTopLeftRadius: borderRadius.xl,
++    borderTopRightRadius: borderRadius.xl,
++    paddingHorizontal: spacing.lg,
++    paddingTop: spacing.md,
++    paddingBottom: spacing.lg,
+   },
+   filterHeader: {
+     flexDirection: "row",
+     alignItems: "center",
+     justifyContent: "space-between",
+-    marginBottom: 18,
++    marginBottom: spacing.lg,
+   },
+   filterTitle: {
+-    fontSize: 18,
++    fontSize: typography.title,
+     fontWeight: "800",
+   },
+   iconButton: {
+-    width: 36,
+-    height: 36,
++    width: moderateScale(36),
++    height: moderateScale(36),
+     alignItems: "center",
+     justifyContent: "center",
+   },
+   filterLabel: {
+-    marginBottom: 8,
+-    fontSize: 12,
++    marginBottom: spacing.xs,
++    fontSize: typography.caption,
+     fontWeight: "800",
+     textTransform: "uppercase",
+   },
+   dateRangeRow: {
+     flexDirection: "row",
+-    gap: 10,
+-    marginBottom: 18,
++    gap: spacing.sm,
++    marginBottom: spacing.lg,
+   },
+   dateButton: {
+     flex: 1,
+-    minHeight: 46,
+-    borderRadius: 14,
++    minHeight: moderateScale(46),
++    borderRadius: borderRadius.lg,
+     borderWidth: 1,
+-    paddingHorizontal: 12,
++    paddingHorizontal: spacing.sm,
+     flexDirection: "row",
+     alignItems: "center",
+-    gap: 8,
++    gap: spacing.sm,
+   },
+   dateButtonText: {
+     flex: 1,
+-    fontSize: 13,
++    fontSize: typography.label,
+     fontWeight: "700",
+   },
+   segmentedControl: {
+     flexDirection: "row",
+-    borderRadius: 14,
+-    padding: 4,
+-    marginBottom: 18,
++    borderRadius: borderRadius.lg,
++    padding: spacing.xs,
++    marginBottom: spacing.lg,
+   },
+   segmentButton: {
+     flex: 1,
+-    minHeight: 42,
+-    borderRadius: 11,
++    minHeight: moderateScale(42),
++    borderRadius: borderRadius.sm,
+     flexDirection: "row",
+     alignItems: "center",
+     justifyContent: "center",
+-    gap: 8,
++    gap: spacing.sm,
+   },
+   segmentText: {
+-    fontSize: 13,
++    fontSize: typography.label,
+     fontWeight: "800",
+   },
+   filterActions: {
+     flexDirection: "row",
+-    gap: 10,
++    gap: spacing.sm,
+   },
+   clearButton: {
+     flex: 1,
+-    minHeight: 46,
+-    borderRadius: 14,
++    minHeight: moderateScale(46),
++    borderRadius: borderRadius.lg,
+     borderWidth: 1,
+     alignItems: "center",
+     justifyContent: "center",
+@@ -1143,8 +1159,8 @@ const styles = StyleSheet.create({
+   },
+   applyButton: {
+     flex: 1,
+-    minHeight: 46,
+-    borderRadius: 14,
++    minHeight: moderateScale(46),
++    borderRadius: borderRadius.lg,
+     alignItems: "center",
+     justifyContent: "center",
+   },
+

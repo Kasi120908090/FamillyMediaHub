@@ -14,13 +14,6 @@ import {
 import { useAuth } from "../../hooks/useAuth";
 import { authService } from "../../services/authService";
 
-const passwordChecks = [
-  { key: "length", label: "At least 8 characters" },
-  { key: "lowercase", label: "One lowercase letter" },
-  { key: "uppercase", label: "One uppercase letter" },
-  { key: "symbol", label: "One number or symbol" },
-];
-
 export default function FirstLoginSetupScreen({ navigation }) {
   const { authToken, completeFirstLogin, currentUser, isSubmitting, logout } = useAuth();
   const [step, setStep] = useState("email"); // email -> otp-password
@@ -48,16 +41,6 @@ export default function FirstLoginSetupScreen({ navigation }) {
     }, 1000);
     return () => clearInterval(interval);
   }, [timer]);
-
-  const passwordState = useMemo(
-    () => ({
-      length: newPassword.length >= 8,
-      lowercase: /[a-z]/.test(newPassword),
-      uppercase: /[A-Z]/.test(newPassword),
-      symbol: /[\d\W]/.test(newPassword),
-    }),
-    [newPassword]
-  );
 
   const handleOtpChange = (value, index) => {
     const digits = value.replace(/\D/g, "");
@@ -136,10 +119,6 @@ export default function FirstLoginSetupScreen({ navigation }) {
       Alert.alert("Password required", "Create a new password to continue.");
       return;
     }
-    if (!Object.values(passwordState).every(Boolean)) {
-      Alert.alert("Weak password", "Please follow the password rules before continuing.");
-      return;
-    }
     if (newPassword !== confirmPassword) {
       Alert.alert("Password mismatch", "New password and confirm password must match.");
       return;
@@ -167,7 +146,7 @@ export default function FirstLoginSetupScreen({ navigation }) {
 
   const getSubtitle = () => {
     if (step === "email") return "Enter your email address to get started.";
-    return "Check your email for the code and create a strong password.";
+    return "Check your email for the code and create your password.";
   };
 
   return (
@@ -267,24 +246,6 @@ export default function FirstLoginSetupScreen({ navigation }) {
               secureVisible={confirmVisible}
               onToggleSecure={() => setConfirmVisible((current) => !current)}
             />
-
-            <View style={styles.rulesGrid}>
-              {passwordChecks.map((rule) => {
-                const isMet = passwordState[rule.key];
-                return (
-                  <View key={rule.key} style={styles.ruleItem}>
-                    <Ionicons
-                      name={isMet ? "checkmark-circle" : "ellipse-outline"}
-                      size={14}
-                      color={isMet ? "#7A4EFF" : "#CABEEB"}
-                    />
-                    <Text style={[styles.ruleText, isMet ? styles.ruleTextActive : null]}>
-                      {rule.label}
-                    </Text>
-                  </View>
-                );
-              })}
-            </View>
 
             <PrimaryAction
               label="Complete Setup"

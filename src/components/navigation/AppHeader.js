@@ -78,6 +78,7 @@ const styles = StyleSheet.create({
     height: 30,
     alignItems: "center",
     justifyContent: "center",
+    paddingLeft: 4,
   },
 
   titleWrap: {

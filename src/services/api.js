@@ -120,10 +120,12 @@ export async function apiRequest(endpoint, options = {}) {
 
 export function resolveMediaUri(filePath) {
   if (!filePath) {
+    console.log("[resolveMediaUri] filePath is null/empty, returning null");
     return null;
   }
 
   const normalizedPath = String(filePath).replace(/\\/g, "/");
+  console.log("[resolveMediaUri] Input filePath:", filePath, "normalized:", normalizedPath);
 
   if (
     normalizedPath.startsWith("http://") ||
@@ -133,14 +135,20 @@ export function resolveMediaUri(filePath) {
     normalizedPath.startsWith("data:") ||
     normalizedPath.startsWith("ph://")
   ) {
-    return encodeURI(normalizedPath);
+    const encoded = encodeURI(normalizedPath);
+    console.log("[resolveMediaUri] Already has scheme, returning:", encoded);
+    return encoded;
   }
 
   const apiBaseUrl = getCurrentBackendBaseUrl();
+  console.log("[resolveMediaUri] No scheme found, apiBaseUrl:", apiBaseUrl);
 
   if (!apiBaseUrl) {
+    console.log("[resolveMediaUri] No backend URL available, returning null");
     return null;
   }
 
-  return encodeURI(`${apiBaseUrl}/${normalizedPath.replace(/^\/+/, "")}`);
+  const result = encodeURI(`${apiBaseUrl}/${normalizedPath.replace(/^\/+/, "")}`);
+  console.log("[resolveMediaUri] Constructed URL:", result);
+  return result;
 }

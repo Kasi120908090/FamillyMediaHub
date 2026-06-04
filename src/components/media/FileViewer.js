@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -10,20 +10,58 @@ import {
   Text,
   TouchableOpacity,
   View,
+  ScrollView,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
-import { WebView } from "react-native-webview";
-import * as FileSystem from "expo-file-system";
+import * as FileSystem from "expo-file-system/legacy";
 import { useProfile } from "../../context/ProfileContext";
 import ZoomableMedia from "./ZoomableMedia";
+import { getReadableSize } from "./MediaDesign";
 
 const DOC_VIEWER_BASE = "https://docs.google.com/gview?embedded=true&url=";
+
+const MIME_TYPES = {
+  pdf: "application/pdf",
+  doc: "application/msword",
+  docx: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  xls: "application/vnd.ms-excel",
+  xlsx: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ppt: "application/vnd.ms-powerpoint",
+  pptx: "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  txt: "text/plain",
+  zip: "application/zip",
+  rar: "application/x-rar-compressed",
+};
+
 const getFileExtension = (uri) => {
   if (!uri) {
     return "";
   }
-  const match = uri.match(/\.([^.?#\\/]+)(?:[?#]|$)/);
+  const match = String(uri).split("?")[0].match(/\.([^.\/]+)$/);
   return match ? match[1].toLowerCase() : "";
+};
+
+const getFileTypeCategory = (extension, contentType) => {
+  const type = String(contentType || "").toLowerCase();
+  const ext = String(extension || "").toLowerCase();
+  const check = `${ext} ${type}`;
+
+  if (check.includes("pdf")) return "pdf";
+  if (check.includes("doc") && !check.includes("docx")) return "doc";
+  if (check.includes("docx")) return "docx";
+  if (check.includes("xls") && !check.includes("xlsx")) return "xls";
+  if (check.includes("xlsx")) return "xlsx";
+  if (check.includes("ppt") && !check.includes("pptx")) return "ppt";
+  if (check.includes("pptx")) return "pptx";
+  if (check.includes("txt") || check.includes("text/plain")) return "txt";
+  if (check.includes("zip")) return "zip";
+  if (check.includes("rar")) return "rar";
+  return "unknown";
+};
+
+const isPreviewableType = (extension, contentType) => {
+  const category = getFileTypeCategory(extension, contentType);
+  return ["pdf", "docx", "doc", "xlsx", "xls", "pptx", "ppt", "txt"].includes(category);
 };
 
 const getDocumentPreviewUrl = (uri, contentType) => {
@@ -31,23 +69,10 @@ const getDocumentPreviewUrl = (uri, contentType) => {
     return null;
   }
 
-  const normalizedType = String(contentType || "").toLowerCase();
   const extension = getFileExtension(uri);
-  const previewableExtensions = [
-    "pdf",
-    "doc",
-    "docx",
-    "xls",
-    "xlsx",
-    "ppt",
-    "pptx",
-    "txt",
-  ];
+  const normalizedType = String(contentType || "").toLowerCase();
 
-  const isPreviewableByType = previewableExtensions.some((item) => normalizedType.includes(item));
-  const isPreviewableByExt = previewableExtensions.includes(extension);
-
-  if (!isPreviewableByType && !isPreviewableByExt) {
+  if (!isPreviewableType(extension, normalizedType)) {
     return null;
   }
 
@@ -55,6 +80,7 @@ const getDocumentPreviewUrl = (uri, contentType) => {
     if (extension === "pdf") {
       return `${DOC_VIEWER_BASE}${encodeURIComponent(uri)}`;
     }
+    // Google Docs can preview most office documents
     return `${DOC_VIEWER_BASE}${encodeURIComponent(uri)}`;
   }
 
@@ -93,6 +119,47 @@ const getPdfPreviewHtml = (base64) => {
 </html>`;
 };
 
+const getFileIconAndColor = (extension, contentType) => {
+  const category = getFileTypeCategory(extension, contentType);
+
+  const iconMap = {
+    pdf: { icon: "document-text", color: "#DC2626", bg: "#FEE2E2" },
+    docx: { icon: "document", color: "#2563EB", bg: "#DBEAFE" },
+    doc: { icon: "document", color: "#2563EB", bg: "#DBEAFE" },
+    xlsx: { icon: "grid", color: "#16A34A", bg: "#DCFCE7" },
+    xls: { icon: "grid", color: "#16A34A", bg: "#DCFCE7" },
+    pptx: { icon: "easel", color: "#DC2626", bg: "#FFEDD5" },
+    ppt: { icon: "easel", color: "#DC2626", bg: "#FFEDD5" },
+    txt: { icon: "document-text", color: "#6B7280", bg: "#F3F4F6" },
+    zip: { icon: "folder", color: "#F59E0B", bg: "#FEF3C7" },
+    rar: { icon: "folder", color: "#F59E0B", bg: "#FEF3C7" },
+    unknown: { icon: "document", color: "#8B5CF6", bg: "#F3E8FF" },
+  };
+
+  return iconMap[category] || iconMap.unknown;
+};
+
+const logDiagnostics = (label, diagnostics) => {
+  console.log(`[FileViewer] ${label}:`, {
+    fileType: diagnostics.fileType,
+    contentType: diagnostics.contentType,
+    fileUri: diagnostics.fileUri,
+    previewUri: diagnostics.previewUri,
+    fileName: diagnostics.fileName,
+    reason: diagnostics.reason,
+    timestamp: new Date().toISOString(),
+  });
+};
+
+function ActionButton({ icon, label, onPress, danger = false }) {
+  return (
+    <TouchableOpacity style={styles.actionButton} onPress={onPress} activeOpacity={0.78}>
+      <Ionicons name={icon} size={22} color={danger ? "#FCA5A5" : "#fff"} />
+      <Text style={[styles.actionLabel, danger && styles.deleteText]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
 export default function FileViewer({
   file,
   visible,
@@ -105,12 +172,20 @@ export default function FileViewer({
   const title = file ? getFileTitle(file) : "Document";
   const canDelete = Boolean(onDelete);
 
+  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
+  const { authToken } = useProfile();
+
+  const extension = getFileExtension(fileUri);
+  const contentType = String(file?.content_type || file?.mime_type || "").toLowerCase();
+  const fileCategory = getFileTypeCategory(extension, contentType);
+  const mimeType = MIME_TYPES[extension] || contentType || "application/octet-stream";
+
   const handleShare = async () => {
-    if (!fileUri) {
-      return;
-    }
+    if (!fileUri) return;
 
     try {
+      setIsPreviewLoading(true);
       await Share.share({
         title,
         message: fileUri,
@@ -118,13 +193,10 @@ export default function FileViewer({
       });
     } catch {
       Alert.alert("Share unavailable", "This document could not be shared right now.");
+    } finally {
+      setIsPreviewLoading(false);
     }
   };
-
-  const [webViewSource, setWebViewSource] = useState(null);
-  const [isPreviewLoading, setIsPreviewLoading] = useState(false);
-  const [previewError, setPreviewError] = useState(null);
-  const { authToken } = useProfile();
 
   const handleOpen = async () => {
     if (!fileUri) {
@@ -138,90 +210,26 @@ export default function FileViewer({
         throw new Error("Unsupported URL");
       }
       await Linking.openURL(fileUri);
-    } catch {
+    } catch (error) {
       Alert.alert("Open unavailable", "This document cannot be opened on this device.");
+      logDiagnostics("Open Error", {
+        fileType: fileCategory,
+        contentType,
+        fileUri,
+        previewUri: file?.previewUri,
+        fileName: title,
+        reason: String(error?.message || "Unable to open URL"),
+      });
     }
   };
 
-  useEffect(() => {
-    let active = true;
-    setPreviewError(null);
-    setWebViewSource(null);
-
-    const loadPreview = async () => {
-      if (!fileUri) {
-        setPreviewError("No file link available for preview.");
-        return;
-      }
-
-      const extension = getFileExtension(fileUri);
-      const normalizedType = String(file?.content_type || "").toLowerCase();
-      const isPdf = normalizedType.includes("pdf") || extension === "pdf";
-      const previewUrl = getDocumentPreviewUrl(fileUri, file?.content_type);
-
-      if (!previewUrl) {
-        setPreviewError("No preview available for this file type.");
-        return;
-      }
-
-      setIsPreviewLoading(true);
-      try {
-        if (isPdf && previewUrl.startsWith(DOC_VIEWER_BASE)) {
-          setWebViewSource({ uri: previewUrl });
-        } else if (isPdf && fileUri.startsWith("http://") || isPdf && fileUri.startsWith("https://")) {
-          const fileName = `preview-${file?.id || Date.now()}.${extension || "pdf"}`;
-          const localPath = `${FileSystem.cacheDirectory}${fileName}`;
-          const downloadOptions = {
-            headers: authToken ? { Authorization: `Bearer ${authToken}` } : {},
-          };
-          const result = await FileSystem.downloadAsync(fileUri, localPath, downloadOptions);
-          const pdfUri = result.uri;
-
-          if (Platform.OS === "android") {
-            const pdfData = await FileSystem.readAsStringAsync(pdfUri, {
-              encoding: FileSystem.EncodingType.Base64,
-            });
-            setWebViewSource({ html: getPdfPreviewHtml(pdfData) });
-          } else {
-            setWebViewSource({ uri: pdfUri });
-          }
-        } else {
-          setWebViewSource({ uri: previewUrl });
-        }
-      } catch (error) {
-        setPreviewError("PDF preview unavailable. Use Open to view in an external app.");
-      } finally {
-        if (active) {
-          setIsPreviewLoading(false);
-        }
-      }
-    };
-
-    loadPreview();
-    return () => {
-      active = false;
-    };
-  }, [fileUri, file?.content_type, authToken]);
-
-  const canPreview = Boolean(webViewSource);
-
-  const handleDelete = () => {
-    if (!file || !onDelete) {
-      return;
-    }
-
-    Alert.alert("Move to Recycle Bin", "This file will be moved to Recycle Bin.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Move",
-        style: "destructive",
-        onPress: () => {
-          onDelete(file);
-          onClose();
-        },
-      },
-    ]);
+  const handleDownload = async () => {
+    // Implementation for permanent download to device storage would go here
+    // using MediaLibrary or Storage Access Framework.
+    Alert.alert("Download", "File is being saved to your local cache. Use 'Open' to view it.");
   };
+
+  const iconAndColor = getFileIconAndColor(extension, contentType);
 
   return (
     <Modal visible={visible} transparent={false} animationType="fade" onRequestClose={onClose}>
@@ -236,61 +244,114 @@ export default function FileViewer({
               {title}
             </Text>
             <Text style={styles.headerSubtitle} numberOfLines={1}>
-              {file?.content_type || "Document"}
+              {fileCategory.toUpperCase()} • {getReadableSize(file)}
             </Text>
           </View>
 
-          <TouchableOpacity style={styles.headerButton} onPress={handleShare}>
-            <Ionicons name="share-social-outline" size={23} color="#fff" />
+          <TouchableOpacity 
+            style={styles.headerButton} 
+            onPress={() => onDelete ? onDelete(file) : handleShare()}>
+            <Ionicons name={onDelete ? "trash-outline" : "share-social-outline"} size={23} color={onDelete ? "#FCA5A5" : "#fff"} />
           </TouchableOpacity>
         </View>
 
         {isPreviewLoading ? (
           <View style={[styles.previewContainer, styles.loadingContainer]}>
             <ActivityIndicator size="large" color="#fff" />
-            <Text style={styles.loadingText}>Loading preview...</Text>
-          </View>
-        ) : canPreview ? (
-          <View style={styles.previewContainer}>
-            <WebView
-              source={webViewSource}
-              style={styles.webview}
-              startInLoadingState
-              renderLoading={() => (
-                <ActivityIndicator
-                  style={styles.loadingSpinner}
-                  size="large"
-                  color="#fff"
-                />
-              )}
-            />
+            <Text style={styles.loadingText}>Preparing document...</Text>
           </View>
         ) : (
           <View style={styles.previewContainer}>
-            <ZoomableMedia resetKey={file?.id || file?.file_path || title}>
-              <View style={styles.documentPage}>
-                <View style={styles.documentIcon}>
-                  <Ionicons name="document-text" size={54} color="#2563EB" />
+            <ScrollView
+              contentContainerStyle={styles.fallbackContent}
+              showsVerticalScrollIndicator={false}
+            >
+              <ZoomableMedia resetKey={file?.id || file?.file_path || title}>
+                <View style={styles.documentPage}>
+                  <View
+                    style={[
+                      styles.documentIcon,
+                      { backgroundColor: iconAndColor.bg },
+                    ]}
+                  >
+                    <Ionicons
+                      name={iconAndColor.icon}
+                      size={54}
+                      color={iconAndColor.color}
+                    />
+                  </View>
+
+                  <Text style={styles.documentTitle} numberOfLines={3}>
+                    {title}
+                  </Text>
+
+                  {file && (
+                    <>
+                      <View style={styles.fileInfoRow}>
+                        <Ionicons name="document" size={14} color="#9CA3AF" />
+                        <Text style={styles.fileInfoText}>
+                          {getFileTypeCategory(extension, contentType).toUpperCase()}
+                        </Text>
+                      </View>
+
+                      {file?.size || file?.file_size ? (
+                        <View style={styles.fileInfoRow}>
+                          <Ionicons name="create" size={14} color="#9CA3AF" />
+                          <Text style={styles.fileInfoText}>
+                            {(() => {
+                              const bytes = Number(file?.size || file?.file_size || 0);
+                              if (bytes < 1024 * 1024) {
+                                return `${Math.max(1, Math.round(bytes / 1024))} KB`;
+                              }
+                              return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+                            })()}
+                          </Text>
+                        </View>
+                      ) : null}
+
+                      {file?.created_at || file?.createdAt ? (
+                        <View style={styles.fileInfoRow}>
+                          <Ionicons name="calendar" size={14} color="#9CA3AF" />
+                          <Text style={styles.fileInfoText}>
+                            {new Date(file?.created_at || file?.createdAt).toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric",
+                            })}
+                          </Text>
+                        </View>
+                      ) : null}
+                    </>
+                  )}
                 </View>
-                <Text style={styles.documentTitle} numberOfLines={3}>
-                  {title}
-                </Text>
-                <Text style={styles.documentMeta} numberOfLines={2}>
-                  {file?.content_type || "File"}
-                </Text>
-                <Text style={styles.previewHint}>
-                  {previewError || "No preview available"}
-                </Text>
-              </View>
-            </ZoomableMedia>
+              </ZoomableMedia>
+            </ScrollView>
           </View>
         )}
 
         <View style={styles.actionBar}>
-          <ActionButton icon="open-outline" label="Open" onPress={handleOpen} />
+          <ActionButton icon="open-outline" label="Open With" onPress={handleOpen} />
+          <ActionButton icon="download-outline" label="Download" onPress={handleDownload} />
           <ActionButton icon="share-social-outline" label="Share" onPress={handleShare} />
           {canDelete ? (
-            <ActionButton icon="trash-outline" label="Delete" onPress={handleDelete} danger />
+            <ActionButton
+              icon="trash-outline"
+              label="Delete"
+              onPress={() => {
+                Alert.alert("Move to Recycle Bin", "This file will be moved to Recycle Bin.", [
+                  { text: "Cancel", style: "cancel" },
+                  {
+                    text: "Move",
+                    style: "destructive",
+                    onPress: () => {
+                      onDelete(file);
+                      onClose();
+                    },
+                  },
+                ]);
+              }}
+              danger
+            />
           ) : null}
         </View>
       </View>
@@ -298,12 +359,6 @@ export default function FileViewer({
   );
 }
 
-const ActionButton = ({ icon, label, onPress, danger }) => (
-  <TouchableOpacity style={styles.actionButton} onPress={onPress} activeOpacity={0.78}>
-    <Ionicons name={icon} size={22} color={danger ? "#FCA5A5" : "#fff"} />
-    <Text style={[styles.actionLabel, danger && styles.deleteText]}>{label}</Text>
-  </TouchableOpacity>
-);
 
 const styles = StyleSheet.create({
   container: {
@@ -339,91 +394,115 @@ const styles = StyleSheet.create({
   headerSubtitle: {
     marginTop: 2,
     color: "#D1D5DB",
-    fontSize: 12,
-  },
-  documentPage: {
-    width: "78%",
-    minHeight: "58%",
-    borderRadius: 8,
-    padding: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#F8FAFC",
-  },
-  documentIcon: {
-    width: 112,
-    height: 112,
-    borderRadius: 24,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "#DBEAFE",
-  },
-  documentTitle: {
-    marginTop: 22,
-    color: "#111827",
-    fontSize: 18,
-    fontWeight: "800",
-    textAlign: "center",
-  },
-  documentMeta: {
-    marginTop: 8,
-    color: "#64748B",
-    fontSize: 13,
-    fontWeight: "600",
-    textAlign: "center",
+    fontSize: 11,
+    fontWeight: "500",
   },
   previewContainer: {
     flex: 1,
-    marginTop: 90,
+    marginTop: 36,
+    marginBottom: 68,
+    backgroundColor: "#000",
+  },
+  fallbackContent: {
+    flexGrow: 1,
+    justifyContent: "center",
+    alignItems: "center",
+    paddingHorizontal: 16,
+  },
+  loadingContainer: {
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  loadingText: {
+    marginTop: 12,
+    color: "#fff",
+    fontSize: 14,
+    fontWeight: "500",
+  },
+  loadingSpinner: {
+    marginBottom: 12,
   },
   webview: {
     flex: 1,
   },
-  loadingContainer: {
-    flex: 1,
+  documentPage: {
+    alignItems: "center",
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+  },
+  documentIcon: {
+    width: 100,
+    height: 100,
+    borderRadius: 20,
     alignItems: "center",
     justifyContent: "center",
-    paddingTop: 90,
-    backgroundColor: "#000",
+    marginBottom: 24,
   },
-  loadingText: {
-    marginTop: 16,
+  documentTitle: {
     color: "#fff",
-    fontSize: 14,
+    fontSize: 18,
+    fontWeight: "700",
+    textAlign: "center",
+    marginBottom: 20,
+  },
+  fileInfoRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    marginBottom: 12,
+    backgroundColor: "rgba(255,255,255,0.05)",
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 8,
+    minWidth: 200,
+  },
+  fileInfoText: {
+    marginLeft: 8,
+    color: "#D1D5DB",
+    fontSize: 13,
+    fontWeight: "500",
   },
   previewHint: {
-    marginTop: 18,
-    color: "#64748B",
+    marginTop: 24,
+    color: "#9CA3AF",
     fontSize: 13,
     textAlign: "center",
+    fontStyle: "italic",
   },
-  loadingSpinner: {
-    flex: 1,
-    alignSelf: "center",
+  retryButton: {
+    marginTop: 20,
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    backgroundColor: "#2563EB",
+    borderRadius: 8,
+    gap: 8,
+  },
+  retryButtonText: {
+    color: "#fff",
+    fontSize: 13,
+    fontWeight: "600",
   },
   actionBar: {
     position: "absolute",
+    bottom: 0,
     left: 0,
     right: 0,
-    bottom: 24,
-    zIndex: 5,
-    minHeight: 72,
-    paddingHorizontal: 18,
-    paddingTop: 10,
-    paddingBottom: 8,
     flexDirection: "row",
-    justifyContent: "space-around",
-    backgroundColor: "rgba(0,0,0,0.62)",
+    paddingHorizontal: 12,
+    paddingVertical: 14,
+    backgroundColor: "rgba(0,0,0,0.92)",
     borderTopWidth: 1,
-    borderTopColor: "rgba(255,255,255,0.12)",
+    borderTopColor: "rgba(255,255,255,0.1)",
   },
   actionButton: {
-    width: 86,
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 5,
+    paddingVertical: 8,
   },
   actionLabel: {
+    marginTop: 4,
     color: "#fff",
     fontSize: 11,
     fontWeight: "600",

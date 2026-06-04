@@ -36,12 +36,23 @@ const NavTabButton = memo(function NavTabButton({
   navigation,
   tab,
   theme,
+  isOnGalleryRoute,
 }) {
   const handlePress = useCallback(() => {
     if (!isActive) {
-      navigation.navigate(tab.id);
+      // For media tabs, use setParams to jump directly without animation if already on Gallery
+      // Otherwise switch to the Gallery tab and pass mediaTab.
+      if (mediaTabIds.has(tab.id)) {
+        if (isOnGalleryRoute) {
+          navigation.setParams({ mediaTab: tab.id });
+        } else {
+          navigation.jumpTo("Gallery", { mediaTab: tab.id });
+        }
+      } else {
+        navigation.navigate(tab.id);
+      }
     }
-  }, [isActive, navigation, tab.id]);
+  }, [isActive, navigation, tab.id, isOnGalleryRoute]);
 
   return (
     <TouchableOpacity
@@ -72,8 +83,13 @@ const BottomNav = memo(function BottomNav({ activeTab, navigation: tabNavigation
   const insets = useSafeAreaInsets();
   const { theme } = useTheme();
   const { canManageMedia } = useProfile();
-  const focusedTab = getFocusedTab(activeTab, state);
-  const showUploadShortcut = !["BackupDashboard", "BackupSettings"].includes(focusedTab);
+  const focusedTab = useMemo(() => getFocusedTab(activeTab, state), [activeTab, state]);
+  const currentRouteName = useMemo(() => state?.routes?.[state.index]?.name, [state]);
+  const isOnGalleryRoute = currentRouteName === "Gallery";
+  const showUploadShortcut = useMemo(
+    () => !["BackupDashboard", "BackupSettings"].includes(focusedTab),
+    [focusedTab]
+  );
   const [uploadOptionsVisible, setUploadOptionsVisible] = useState(false);
 
   const bottomNavStyle = useMemo(
@@ -120,6 +136,7 @@ const BottomNav = memo(function BottomNav({ activeTab, navigation: tabNavigation
               navigation={navigation}
               tab={tab}
               theme={theme}
+              isOnGalleryRoute={isOnGalleryRoute}
             />
           );
         })}
@@ -169,10 +186,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-around",
     alignItems: "center",
-    marginHorizontal: 16,
-    marginBottom: 8,
+    marginHorizontal: 0,
+    marginBottom: 0,
     paddingHorizontal: 5,
-    paddingTop: 7,
+    paddingTop: 10,
     backgroundColor: "#fff",
     borderRadius: 14,
   },

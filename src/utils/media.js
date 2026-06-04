@@ -17,30 +17,46 @@ const getContentType = (uri) => {
   }
 
   const cleanUri = uri.split("?")[0].toLowerCase();
+  console.log("[getContentType] Detecting from URI:", { uri, cleanUri });
 
   if (cleanUri.endsWith(".m3u8")) {
+    console.log("[getContentType] Detected as HLS");
     return "hls";
   }
 
   if (cleanUri.endsWith(".mpd")) {
+    console.log("[getContentType] Detected as DASH");
     return "dash";
   }
 
+  console.log("[getContentType] Detected as progressive");
   return "progressive";
 };
 
 export const getVideoSource = (source) => {
   const uri = typeof source === "string" ? source : source?.uri;
+  const contentType = source?.contentType || (uri ? getContentType(uri) : null);
+
+  console.log("[getVideoSource] Processing source:", {
+    inputType: typeof source,
+    uri,
+    contentType,
+    source,
+  });
 
   if (!uri) {
+    console.log("[getVideoSource] No URI found, returning null");
     return null;
   }
 
-  return {
+  const result = {
     ...(typeof source === "object" && source ? source : {}),
     uri,
-    contentType: source?.contentType || getContentType(uri),
+    contentType,
   };
+  
+  console.log("[getVideoSource] Final result:", result);
+  return result;
 };
 
 export const getVideoThumbnailUri = (item) => {

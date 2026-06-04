@@ -1,6 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  FlatList,
   InteractionManager,
   Modal,
   Platform,
@@ -10,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
+import { FlashList } from "@shopify/flash-list";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import ThemedAvatar from "../../components/common/ThemedAvatar";
@@ -27,7 +27,8 @@ import {
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { resolveMediaUri } from "../../services/api";
-import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
+import { borderRadius, layout, spacing, typography } from "../../theme/designSystem";
+import { moderateScale } from "../../theme/responsive";
 
 const formatGroupTitle = (dateString) => {
   const date = new Date(dateString);
@@ -111,6 +112,17 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
     isChildAccount,
     moveMediaToRecycleBin,
   } = useProfile();
+  const renderCounter = useRef(0);
+  renderCounter.current += 1;
+
+  useEffect(() => {
+    console.log("[Perf] ImagesScreen mount", {
+      renderCount: renderCounter.current,
+      mediaItemsCount: mediaItems.length,
+      selectedChildId,
+    });
+    return () => console.log("[Perf] ImagesScreen unmount");
+  }, []);
   const { theme } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
   const [filterVisible, setFilterVisible] = useState(false);
@@ -132,19 +144,19 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
     return () => task.cancel();
   }, []);
 
-  const images = useMemo(
-    () =>
-      (sceneReady ? mediaItems : [])
-        .filter(
-          (item) => {
-            if (!isChildAccount || !selectedChildId) {
-              return true;
-            }
-
-            const itemChildId = getMediaChildId(item);
-            return itemChildId !== null && String(itemChildId) === String(selectedChildId);
+  const images = useMemo(() => {
+    console.time("[Perf] Images filteredImages");
+    const result = (sceneReady ? mediaItems : [])
+      .filter(
+        (item) => {
+          if (!isChildAccount || !selectedChildId) {
+            return true;
           }
-        )
+
+          const itemChildId = getMediaChildId(item);
+          return itemChildId !== null && String(itemChildId) === String(selectedChildId);
+        }
+      )
         .filter(
           (item) => item.category === "images" || item.content_type?.startsWith("image/")
         )
@@ -163,11 +175,13 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
           isDateReversed
             ? getItemDate(firstItem) - getItemDate(secondItem)
             : getItemDate(secondItem) - getItemDate(firstItem)
-        ),
-    [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]
-  );
+        );
+    console.timeEnd("[Perf] Images filteredImages");
+    return result;
+  }, [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]);
 
   const groupedImages = useMemo(() => {
+    console.time("[Perf] Images groupedImages");
     const groups = {};
 
     images.forEach((item) => {
@@ -178,14 +192,17 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
       groups[key].data.push(item);
     });
 
-    return Object.values(groups).sort((a, b) =>
+    const result = Object.values(groups).sort((a, b) =>
       isDateReversed ? a.date - b.date : b.date - a.date
     );
+    console.timeEnd("[Perf] Images groupedImages");
+    return result;
   }, [images, isDateReversed]);
 
   const layoutSections = useMemo(
-    () =>
-      groupedImages.map((section) => {
+    () => {
+      console.time("[Perf] Images layoutSections");
+      const result = groupedImages.map((section) => {
         const rows = [];
 
         const itemsPerRow = isGridView ? 4 : 1;
@@ -202,18 +219,83 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
           ...section,
           rows,
         };
-      }),
+      });
+      console.timeEnd("[Perf] Images layoutSections");
+      return result;
+    },
     [groupedImages, isGridView]
   );
 
   const featuredImages = useMemo(() => images.slice(0, 3), [images]);
   const latestImage = featuredImages[0];
 
-  const openViewer = (item) => {
-    const index = images.findIndex((currentItem) => currentItem.id === item.id);
-    setViewerIndex(index >= 0 ? index : 0);
-    setViewerVisible(true);
-  };
+  const openViewer = useCallback(
+    (item) => {
+      const index = images.findIndex((currentItem) => currentItem.id === item.id);
+      setViewerIndex(index >= 0 ? index : 0);
+      setViewerVisible(true);
+    },
+    [images]
+  );
+
+  const renderImageSection = useCallback(
+    ({ item: section, index }) => (
+      <FadeInView style={styles.section} delay={Math.min(index * 30, 150)}>
+        <View style={styles.sectionHeader}>
+          <View>
+            <Text style={[styles.sectionTitle, { color: theme.text }]}>{section.title}</Text>
+          </View>
+          <Text style={[styles.sectionMeta, { color: theme.subText }]}>
+            {section.data.length} Photos
+          </Text>
+        </View>
+
+        {section.rows.map((row) => (
+          <View key={row.id} style={styles.pairRow}>
+            {row.items.map((item, itemIndex) => (
+              <TouchableOpacity
+                key={getImageTileKey(item, itemIndex, row.id)}
+                activeOpacity={0.9}
+                onPress={() => openViewer(item)}
+                style={[
+                  isGridView ? styles.pairTile : styles.listTile,
+                  { backgroundColor: theme.card },
+                  isGridView && softShadow,
+                ]}
+              >
+                {isGridView ? (
+                  <>
+                    <CachedImage source={{ uri: getImageUri(item) }} style={styles.tileImage} />
+                    <View style={styles.tileShade} />
+                    <MediaBadge icon="image-outline" />
+                  </>
+                ) : (
+                  <View style={styles.listTileContent}>
+                    <CachedImage source={{ uri: getImageUri(item) }} style={styles.listTileImage} />
+                    <View style={styles.listTileText}>
+                      <Text style={[styles.listTileTitle, { color: theme.text }]} numberOfLines={1}>
+                        {item.original_file_name || item.stored_file_name || "Photo"}
+                      </Text>
+                      <Text style={[styles.listTileMeta, { color: theme.subText }]}> 
+                        {formatShortDate(getItemDate(item))}
+                      </Text>
+                    </View>
+                  </View>
+                )}
+              </TouchableOpacity>
+            ))}
+
+            {isGridView
+              ? Array.from({ length: 4 - row.items.length }).map((_, spacerIndex) => (
+                  <View key={`spacer-${row.id}-${spacerIndex}`} style={styles.pairTileSpacer} />
+                ))
+              : null}
+          </View>
+        ))}
+      </FadeInView>
+    ),
+    [isGridView, openViewer, theme]
+  );
 
   const hasActiveFilters = Boolean(startDate || endDate || !isGridView || isDateReversed);
 
@@ -258,7 +340,7 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
         }
       />
 
-      <FlatList
+      <FlashList
         data={layoutSections}
         keyExtractor={getImageSectionKey}
         showsVerticalScrollIndicator={false}
@@ -266,6 +348,9 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
         initialNumToRender={4}
         maxToRenderPerBatch={5}
         windowSize={7}
+        estimatedItemSize={240}
+        removeClippedSubviews
+        renderItem={renderImageSection}
         ListHeaderComponent={
           <>
             <SearchFilterBar
@@ -459,198 +544,199 @@ const styles = StyleSheet.create({
     backgroundColor: ui.bg,
   },
   avatar: {
-    width: 38,
-    height: 38,
-    borderRadius: 19,
+    width: moderateScale(38),
+    height: moderateScale(38),
+    borderRadius: moderateScale(19),
   },
   content: {
-    paddingBottom: 28,
+    paddingBottom: spacing.xl,
   },
   librarySummary: {
-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
-    paddingTop: 4,
-    paddingBottom: 12,
+    paddingHorizontal: layout.screenPadding,
+    paddingTop: spacing.xs,
+    paddingBottom: spacing.md,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
   },
   summaryMonth: {
-    fontSize: 13,
+    fontSize: typography.label,
     fontWeight: "900",
   },
   summaryCount: {
-    fontSize: 11,
+    fontSize: typography.caption,
     fontWeight: "800",
   },
   heroCard: {
-    marginTop: 8,
-    marginBottom: 14,
-    borderRadius: 24,
-    padding: 18,
+    marginTop: spacing.sm,
+    marginBottom: spacing.lg,
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
     backgroundColor: "#0F172A",
     overflow: "hidden",
     borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.08)",
   },
   heroTopRow: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "flex-start",
-    gap: 14,
+    gap: spacing.lg,
   },
   heroCopy: {
     flex: 1,
-    minHeight: 124,
+    minHeight: moderateScale(124),
   },
   eyebrow: {
     color: "#93C5FD",
-    fontSize: 12,
+    fontSize: typography.caption,
     fontWeight: "700",
     textTransform: "uppercase",
   },
   heroTitle: {
-    marginTop: 7,
+    marginTop: spacing.xs,
     color: "#FFFFFF",
-    fontSize: 27,
+    fontSize: typography.heading,
     fontWeight: "800",
   },
   heroSubtitle: {
-    marginTop: 8,
+    marginTop: spacing.sm,
     color: "#CBD5E1",
-    fontSize: 14,
-    lineHeight: 20,
+    fontSize: typography.body,
+    lineHeight: typography.body * 1.35,
   },
   heroPreviewWrap: {
-    width: 112,
-    height: 124,
+    width: moderateScale(112),
+    height: moderateScale(124),
     position: "relative",
   },
   heroPreview: {
     position: "absolute",
-    width: 78,
-    height: 96,
-    borderRadius: 16,
-    borderWidth: 3,
+    width: moderateScale(78),
+    height: moderateScale(96),
+    borderRadius: borderRadius.lg,
+    borderWidth: moderateScale(3),
     borderColor: "rgba(255,255,255,0.84)",
     backgroundColor: "#DCE5F3",
   },
   heroPreviewMain: {
     right: 0,
-    top: 8,
+    top: moderateScale(8),
     zIndex: 3,
   },
   heroPreviewSecond: {
-    left: 14,
-    top: 22,
+    left: moderateScale(14),
+    top: moderateScale(22),
     zIndex: 2,
     transform: [{ rotate: "-7deg" }],
     opacity: 0.9,
   },
   heroPreviewThird: {
     left: 0,
-    top: 38,
+    top: moderateScale(38),
     zIndex: 1,
     transform: [{ rotate: "7deg" }],
     opacity: 0.78,
   },
   heroEmptyPreview: {
-    width: 104,
-    height: 104,
-    borderRadius: 22,
+    width: moderateScale(104),
+    height: moderateScale(104),
+    borderRadius: borderRadius.xl,
     alignItems: "center",
     justifyContent: "center",
   },
   heroBottomRow: {
-    marginTop: 14,
+    marginTop: spacing.md,
     flexDirection: "row",
     alignItems: "center",
-    gap: 9,
+    gap: spacing.sm,
     flexWrap: "wrap",
   },
   statPill: {
-    minHeight: 34,
-    borderRadius: 17,
-    paddingHorizontal: 12,
+    minHeight: moderateScale(34),
+    borderRadius: moderateScale(17),
+    paddingHorizontal: spacing.sm,
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.xs,
   },
   statPillText: {
-    fontSize: 12,
+    fontSize: typography.label,
     fontWeight: "700",
   },
   toolbarRow: {
     flexDirection: "row",
-    gap: 10,
-    marginBottom: 20,
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
   },
   searchShell: {
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
     backgroundColor: "#FFFFFF",
-    borderRadius: 16,
-    paddingHorizontal: 16,
-    minHeight: 50,
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.md,
+    minHeight: moderateScale(50),
     borderWidth: 1,
     borderColor: "#E5EAF3",
   },
   searchInput: {
     flex: 1,
-    marginLeft: 10,
-    fontSize: 16,
+    marginLeft: spacing.sm,
+    fontSize: typography.body,
     color: "#111827",
   },
   filterButton: {
-    width: 50,
-    height: 50,
-    borderRadius: 16,
+    width: moderateScale(50),
+    height: moderateScale(50),
+    borderRadius: borderRadius.lg,
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
   },
   section: {
-    marginBottom: 18,
-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
+    marginBottom: spacing.lg,
+    paddingHorizontal: layout.screenPadding,
   },
   sectionHeader: {
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginBottom: 9,
+    marginBottom: spacing.sm,
   },
   sectionTitle: {
     color: "#111827",
-    fontSize: 13,
+    fontSize: typography.label,
     fontWeight: "900",
   },
   sectionSubTitle: {
-    marginTop: 3,
+    marginTop: spacing.xs,
     color: "#6B7280",
-    fontSize: 12,
+    fontSize: typography.caption,
     fontWeight: "500",
   },
   sectionCount: {
-    minWidth: 34,
-    height: 28,
-    borderRadius: 14,
+    minWidth: moderateScale(34),
+    height: moderateScale(28),
+    borderRadius: borderRadius.md,
     alignItems: "center",
     justifyContent: "center",
-    paddingHorizontal: 10,
+    paddingHorizontal: spacing.sm,
   },
   sectionMeta: {
     color: "#6B7280",
-    fontSize: 13,
+    fontSize: typography.label,
     fontWeight: "800",
   },
   pairRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginBottom: 8,
+    marginBottom: spacing.sm,
   },
   pairTile: {
     width: "23.4%",
     aspectRatio: 1,
-    borderRadius: 8,
+    borderRadius: borderRadius.sm,
     overflow: "hidden",
     backgroundColor: "#DCE5F3",
   },
@@ -660,8 +746,8 @@ const styles = StyleSheet.create({
   },
   listTile: {
     width: "100%",
-    minHeight: 88,
-    borderRadius: 16,
+    minHeight: moderateScale(88),
+    borderRadius: borderRadius.lg,
     overflow: "hidden",
     backgroundColor: "#FFFFFF",
   },
@@ -669,25 +755,25 @@ const styles = StyleSheet.create({
     flex: 1,
     flexDirection: "row",
     alignItems: "center",
-    padding: 10,
+    padding: spacing.md,
   },
   listTileImage: {
-    width: 68,
-    height: 68,
-    borderRadius: 12,
+    width: moderateScale(68),
+    height: moderateScale(68),
+    borderRadius: borderRadius.md,
     backgroundColor: "#DCE5F3",
   },
   listTileText: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: spacing.md,
   },
   listTileTitle: {
     fontWeight: "800",
-    fontSize: 14,
+    fontSize: typography.body,
   },
   listTileMeta: {
-    marginTop: 4,
-    fontSize: 12,
+    marginTop: spacing.xs,
+    fontSize: typography.caption,
     fontWeight: "600",
   },
   tileImage: {
@@ -700,13 +786,13 @@ const styles = StyleSheet.create({
   },
   tileTopOverlay: {
     position: "absolute",
-    top: 10,
-    right: 10,
+    top: moderateScale(10),
+    right: moderateScale(10),
   },
   tileIconBubble: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: moderateScale(28),
+    height: moderateScale(28),
+    borderRadius: moderateScale(14),
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: "rgba(0,0,0,0.34)",
@@ -716,50 +802,50 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    minHeight: 44,
+    minHeight: moderateScale(44),
     justifyContent: "flex-end",
-    paddingHorizontal: 12,
-    paddingBottom: 10,
+    paddingHorizontal: spacing.sm,
+    paddingBottom: spacing.xs,
     backgroundColor: "rgba(0,0,0,0.30)",
   },
   tileTitle: {
     color: "#fff",
-    fontSize: 12,
+    fontSize: typography.caption,
     fontWeight: "700",
   },
   emptyState: {
-    marginTop: 42,
+    marginTop: spacing.lg,
     backgroundColor: "#FFFFFF",
-    borderRadius: 24,
-    padding: 26,
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
     alignItems: "center",
     borderWidth: 1,
     borderColor: "#E8EDF5",
   },
   emptyIcon: {
-    width: 82,
-    height: 82,
-    borderRadius: 24,
+    width: moderateScale(82),
+    height: moderateScale(82),
+    borderRadius: borderRadius.xl,
     alignItems: "center",
     justifyContent: "center",
   },
   emptyTitle: {
-    marginTop: 16,
+    marginTop: spacing.md,
     color: "#111827",
-    fontSize: 18,
+    fontSize: typography.title,
     fontWeight: "700",
   },
   emptySubtitle: {
-    marginTop: 8,
+    marginTop: spacing.sm,
     color: "#6B7280",
-    lineHeight: 20,
+    lineHeight: typography.body * 1.25,
     textAlign: "center",
   },
   emptyButton: {
-    marginTop: 18,
-    minHeight: 44,
-    borderRadius: 14,
-    paddingHorizontal: 18,
+    marginTop: spacing.lg,
+    minHeight: moderateScale(44),
+    borderRadius: borderRadius.lg,
+    paddingHorizontal: spacing.lg,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -775,81 +861,81 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.42)",
   },
   filterPanel: {
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 22,
+    borderTopLeftRadius: borderRadius.xl,
+    borderTopRightRadius: borderRadius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
   },
   filterHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 18,
+    marginBottom: spacing.lg,
   },
   filterTitle: {
-    fontSize: 18,
+    fontSize: typography.title,
     fontWeight: "800",
   },
   iconButton: {
-    width: 36,
-    height: 36,
+    width: moderateScale(36),
+    height: moderateScale(36),
     alignItems: "center",
     justifyContent: "center",
   },
   filterLabel: {
-    marginBottom: 8,
-    fontSize: 12,
+    marginBottom: spacing.xs,
+    fontSize: typography.caption,
     fontWeight: "800",
     textTransform: "uppercase",
   },
   dateRangeRow: {
     flexDirection: "row",
-    gap: 10,
-    marginBottom: 18,
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
   },
   dateButton: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: 14,
+    minHeight: moderateScale(46),
+    borderRadius: borderRadius.lg,
     borderWidth: 1,
-    paddingHorizontal: 12,
+    paddingHorizontal: spacing.sm,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.sm,
   },
   dateButtonText: {
     flex: 1,
-    fontSize: 13,
+    fontSize: typography.label,
     fontWeight: "700",
   },
   segmentedControl: {
     flexDirection: "row",
-    borderRadius: 14,
-    padding: 4,
-    marginBottom: 18,
+    borderRadius: borderRadius.lg,
+    padding: spacing.xs,
+    marginBottom: spacing.lg,
   },
   segmentButton: {
     flex: 1,
-    minHeight: 42,
-    borderRadius: 11,
+    minHeight: moderateScale(42),
+    borderRadius: borderRadius.sm,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: spacing.sm,
   },
   segmentText: {
-    fontSize: 13,
+    fontSize: typography.label,
     fontWeight: "800",
   },
   filterActions: {
     flexDirection: "row",
-    gap: 10,
+    gap: spacing.sm,
   },
   clearButton: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: 14,
+    minHeight: moderateScale(46),
+    borderRadius: borderRadius.lg,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -859,8 +945,8 @@ const styles = StyleSheet.create({
   },
   applyButton: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: 14,
+    minHeight: moderateScale(46),
+    borderRadius: borderRadius.lg,
     alignItems: "center",
     justifyContent: "center",
   },

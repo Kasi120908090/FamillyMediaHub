@@ -1,9 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   BackHandler,
-  FlatList,
   InteractionManager,
   Platform,
   StyleSheet,
@@ -14,6 +13,7 @@ import {
   Modal,
   useWindowDimensions,
 } from "react-native";
+import { FlashList } from "@shopify/flash-list";
 import DateTimePicker from "@react-native-community/datetimepicker";
 import { Ionicons } from "@expo/vector-icons";
 import { useFocusEffect } from "@react-navigation/native";
@@ -21,9 +21,7 @@ import ThemedAvatar from "../../components/common/ThemedAvatar";
 import AppHeader from "../../components/navigation/AppHeader";
 import CachedImage from "../../components/media/CachedImage";
 import ImageViewer from "../../components/media/ImageViewer";
-import VideoPlayer from "../../components/media/VideoPlayer"; // Assuming this path based on VideosScreen.js
 import VideoThumbnail from "../../components/media/VideoThumbnail";
-import ZoomableMedia from "../../components/media/ZoomableMedia";
 import {
   FadeInView,
   FileChip,
@@ -31,6 +29,7 @@ import {
   MediaBadge,
   PlayButton,
   SearchFilterBar,
+  getFileTone,
   formatDuration,
   getFriendlyTitle,
   getReadableSize,
@@ -40,17 +39,22 @@ import {
 } from "../../components/media/MediaDesign";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
-import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
-import { getMediaUri, getVideoThumbnailUri } from "../../utils/media";
+import { borderRadius, layout, spacing, typography } from "../../theme/designSystem";
+import { moderateScale } from "../../theme/responsive";
+import { getMediaUri } from "../../utils/media";
+import { getOrCreateVideoThumbnailUri } from "../../utils/videoThumbnails";
 
 const GRID_COLUMNS = 3;
 const GRID_GAP = 10;
 
 const getNormalizedCategory = (item) => {
-  if (item?.category === "images" || item?.content_type?.startsWith("image/")) {
+  const cat = String(item?.category || "").toLowerCase();
+  const mime = String(item?.content_type || "").toLowerCase();
+
+  if (cat === "images" || cat === "image" || mime.startsWith("image/")) {
     return "images";
   }
-  if (item?.category === "videos" || item?.content_type?.startsWith("video/")) {
+  if (cat === "videos" || cat === "video" || mime.startsWith("video/")) {
     return "videos";
   }
   return "files";
@@ -74,6 +78,21 @@ const getMediaItemId = (item) =>
   item?.previewUri ??
   item?.stored_file_name ??
   item?.original_file_name;
+
+const getMediaItemIdentity = (item) => {
+  const uri = getMediaUri(item);
+  const id = getMediaItemId(item);
+  const fallback =
+    item?.original_file_name ||
+    item?.stored_file_name ||
+    item?.file_path ||
+    item?.uri ||
+    item?.local_uri ||
+    item?.localUri ||
+    "unknown-media-item";
+
+  return String(id || uri || fallback);
+};
 
 const getMediaChildId = (item) =>
   item?.child_id ??
@@ -144,6 +163,17 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
     loadChildMedia,
     moveMediaToRecycleBin,
   } = useProfile();
+  const renderCounter = useRef(0);
+  renderCounter.current += 1;
+
+  useEffect(() => {
+    console.log("[Perf] GalleryScreen mount", {
+      renderCount: renderCounter.current,
+      mediaItemsCount: mediaItems.length,
+      selectedChildId,
+    });
+    return () => console.log("[Perf] GalleryScreen unmount");
+  }, []);
   const { theme } = useTheme();
   const { width: windowWidth } = useWindowDimensions();
   const [searchQuery, setSearchQuery] = useState("");
@@ -156,11 +186,6 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
   const [isDateReversed, setIsDateReversed] = useState(false);
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
-  const [videoViewerVisible, setVideoViewerVisible] = useState(false);
-  const [currentVideoUri, setCurrentVideoUri] = useState(null);
-  const [currentVideoThumbnailUri, setCurrentVideoThumbnailUri] = useState(null);
-  const [hasVideoFirstFrame, setHasVideoFirstFrame] = useState(false);
-  const [showVideoCover, setShowVideoCover] = useState(false);
   const [isMediaLoading, setIsMediaLoading] = useState(false);
   const [mediaLoadError, setMediaLoadError] = useState("");
   const [sceneReady, setSceneReady] = useState(false);
@@ -187,33 +212,35 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
     });
   }, [isChildAccount, mediaItems, sceneReady, selectedChildId]);
 
-  const filteredMediaItems = useMemo(
-    () =>
-      scopedMediaItems
-        .filter((item) => {
-          const itemDate = getItemDate(item);
-          const isAfterStart = startDate ? itemDate >= getStartOfDay(startDate) : true;
-          const isBeforeEnd = endDate ? itemDate <= getEndOfDay(endDate) : true;
-          return isAfterStart && isBeforeEnd;
-        })
-        .filter((item) => {
-          if (mediaType === "all") return true;
-          return getNormalizedCategory(item) === mediaType;
-        })
-        .filter((item) =>
-          (item.original_file_name || item.stored_file_name || "")
-            .toLowerCase()
-            .includes(searchQuery.toLowerCase())
-        )
-        .sort((firstItem, secondItem) =>
-          isDateReversed
-            ? getItemDate(firstItem) - getItemDate(secondItem)
-            : getItemDate(secondItem) - getItemDate(firstItem)
-        ),
-    [endDate, mediaType, scopedMediaItems, searchQuery, startDate, isDateReversed]
-  );
+  const filteredMediaItems = useMemo(() => {
+    console.time("[Perf] Gallery filteredMediaItems");
+    const result = scopedMediaItems
+      .filter((item) => {
+        const itemDate = getItemDate(item);
+        const isAfterStart = startDate ? itemDate >= getStartOfDay(startDate) : true;
+        const isBeforeEnd = endDate ? itemDate <= getEndOfDay(endDate) : true;
+        return isAfterStart && isBeforeEnd;
+      })
+      .filter((item) => {
+        if (mediaType === "all") return true;
+        return getNormalizedCategory(item) === mediaType;
+      })
+      .filter((item) =>
+        (item.original_file_name || item.stored_file_name || "")
+          .toLowerCase()
+          .includes(searchQuery.toLowerCase())
+      )
+      .sort((firstItem, secondItem) =>
+        isDateReversed
+          ? getItemDate(firstItem) - getItemDate(secondItem)
+          : getItemDate(secondItem) - getItemDate(firstItem)
+      );
+    console.timeEnd("[Perf] Gallery filteredMediaItems");
+    return result;
+  }, [endDate, mediaType, scopedMediaItems, searchQuery, startDate, isDateReversed]);
 
   const groupedMedia = useMemo(() => {
+    console.time("[Perf] Gallery groupedMedia");
     const groups = {};
 
     filteredMediaItems.forEach((item) => {
@@ -242,11 +269,13 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
       };
     });
 
-    return grouped.sort((firstGroup, secondGroup) =>
+    const result = grouped.sort((firstGroup, secondGroup) =>
       isDateReversed
         ? firstGroup.date - secondGroup.date
         : secondGroup.date - firstGroup.date
     );
+    console.timeEnd("[Perf] Gallery groupedMedia");
+    return result;
   }, [filteredMediaItems, isDateReversed]);
 
   const stats = useMemo(() => {
@@ -269,14 +298,164 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
     [filteredMediaItems]
   );
 
+  const imageItemIndexMap = useMemo(() => {
+    const refMap = new Map();
+    const identityMap = new Map();
+
+    imageItems.forEach((item, index) => {
+      refMap.set(item, index);
+      const key = getMediaItemIdentity(item);
+      if (!identityMap.has(key)) {
+        identityMap.set(key, index);
+      }
+    });
+
+    return { refMap, identityMap };
+  }, [imageItems]);
+
   const mediaTileSize = useMemo(
     () =>
       (windowWidth -
-        SCREEN_HORIZONTAL_PADDING * 2 -
+        layout.screenPadding * 2 -
         GRID_GAP * (GRID_COLUMNS - 1)) /
       GRID_COLUMNS,
     [windowWidth]
   );
+
+  const galleryListItems = useMemo(() => {
+    console.time("[Perf] Gallery galleryListItems");
+    const items = [];
+
+    groupedMedia.forEach((group) => {
+      items.push({
+        type: "header",
+        key: `group-header-${group.title}`,
+        title: group.title,
+        date: group.date,
+        count: group.items.length,
+      });
+
+      for (let rowIndex = 0; rowIndex < group.items.length; rowIndex += GRID_COLUMNS) {
+        const rowItems = group.items.slice(rowIndex, rowIndex + GRID_COLUMNS).map((mediaItem) => ({
+          mediaItem,
+          imageIndex:
+            getNormalizedCategory(mediaItem) === "images"
+              ? imageItemIndexMap.identityMap.get(getMediaItemIdentity(mediaItem))
+              : undefined,
+        }));
+
+        items.push({
+          type: "mediaRow",
+          key: `group-row-${group.title}-${rowIndex}`,
+          items: rowItems,
+        });
+      }
+    });
+
+    const result = items;
+    console.timeEnd("[Perf] Gallery galleryListItems");
+    return result;
+  }, [groupedMedia, imageItemIndexMap]);
+
+  const handleMediaPress = useCallback(
+    (item, selectedIndex) => {
+      const category = getNormalizedCategory(item);
+      if (category === "images") {
+        openViewer(item, selectedIndex);
+      } else if (category === "videos") {
+        openVideoViewer(item);
+      } else {
+        navigation.setParams({ mediaTab: "Files" });
+      }
+    },
+    [navigation, openViewer, openVideoViewer]
+  );
+
+  const renderGalleryItem = useCallback(
+    ({ item }) => {
+      if (item.type === "header") {
+        return (
+          <FadeInView style={styles.group} delay={0}>
+            <View style={styles.groupHeader}>
+              <View style={styles.groupTitleWrap}>
+                <Ionicons name="calendar-outline" size={13} color={theme.primary} />
+                <Text style={[styles.groupTitle, { color: theme.text }]}>{item.title}</Text>
+                <Text style={[styles.groupDate, { color: theme.subText }]}>
+                  {formatShortDate(item.date)}
+                </Text>
+              </View>
+              <Ionicons name="chevron-down" size={16} color={theme.primary} />
+            </View>
+          </FadeInView>
+        );
+      }
+
+      return (
+        <View style={[styles.gridRow, { marginBottom: GRID_GAP }]}>
+          {item.items.map(({ mediaItem, imageIndex }, index) => {
+            const isLastItem = index === item.items.length - 1;
+            const category = getNormalizedCategory(mediaItem);
+            const isFile = category === "files";
+            const fileName = mediaItem.original_file_name || mediaItem.stored_file_name || "Document";
+
+            return (
+              <TouchableOpacity
+                key={getMediaItemKey(mediaItem, imageIndex ?? index, item.key)}
+                activeOpacity={0.88}
+                style={[
+                  isFile ? styles.fileCard : styles.mediaTile,
+                  {
+                    width: mediaTileSize,
+                    height: mediaTileSize,
+                    marginRight: isLastItem ? 0 : GRID_GAP,
+                    backgroundColor: theme.card,
+                  },
+                ]}
+                onPress={() => handleMediaPress(mediaItem, imageIndex)}
+              >
+                {isFile ? (
+                  <>
+                    <View style={styles.cardPreview}>
+                      <View style={[styles.iconLarge, { backgroundColor: getFileTone(fileName, mediaItem.content_type).bg }]}>
+                        <Ionicons
+                          name={getFileTone(fileName, mediaItem.content_type).icon}
+                          size={moderateScale(32)}
+                          color={getFileTone(fileName, mediaItem.content_type).color}
+                        />
+                      </View>
+                    </View>
+                    <View style={styles.cardInfo}>
+                      <Text style={[styles.fileName, { color: theme.text }]} numberOfLines={1}>
+                        {getFriendlyTitle(mediaItem, "File")}
+                      </Text>
+                      <Text style={[styles.fileMeta, { color: theme.subText }]} numberOfLines={1}>
+                        {getReadableSize(mediaItem)} • {formatShortDate(getItemDate(mediaItem))}
+                      </Text>
+                    </View>
+                  </>
+                ) : (
+                  <View style={styles.mediaTileContent}>
+                    {category === "images" && (
+                      <CachedImage source={{ uri: getMediaUri(mediaItem) }} style={styles.mediaPreview} />
+                    )}
+                    {category === "videos" && (
+                      <VideoThumbnail item={mediaItem} style={styles.mediaPreview} small showDuration />
+                    )}
+                    {category === "images" ? (
+                      <MediaBadge icon="image-outline" />
+                    ) : null}
+                  </View>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+      );
+    },
+    [handleMediaPress, mediaTileSize, theme]
+  );
+
+  const getGalleryListKey = useCallback((item) => item.key, []);
 
   const hasActiveFilters = Boolean(startDate || endDate || !isGridView || isDateReversed);
 
@@ -315,50 +494,56 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
     }, [isChildAccount, loadChildMedia, selectedChildId])
   );
 
-  const openViewer = (item) => {
+  const openViewer = useCallback(
+    (item, selectedIndex) => {
+      let index = selectedIndex;
+
+      if (index === undefined || index === null || index < 0) {
+        index = imageItemIndexMap.refMap.get(item);
+      }
+
+      if (index === undefined || index === null || index < 0) {
+        const itemKey = getMediaItemIdentity(item);
+        index = imageItemIndexMap.identityMap.get(itemKey);
+      }
+
+      if (index === undefined || index === null || index < 0) {
+        const targetUri = getMediaUri(item);
+        index = imageItems.findIndex((currentItem) => {
+          if (currentItem === item) {
+            return true;
+          }
+
+          try {
+            if (targetUri && getMediaUri(currentItem) === targetUri) {
+              return true;
+            }
+          } catch (e) {
+            // ignore
+          }
+
+          const currentId = getMediaItemId(currentItem);
+          const itemId = getMediaItemId(item);
+          return currentId && itemId && String(currentId) === String(itemId);
+        });
+      }
+
+      setViewerIndex(index >= 0 ? index : 0);
+      setViewerVisible(true);
+    },
+    [imageItems, imageItemIndexMap]
+  );
+
+  const openVideoViewer = useCallback((item) => {
+    const videos = filteredMediaItems.filter(i => getNormalizedCategory(i) === "videos");
     const itemId = getMediaItemId(item);
-    const index = imageItems.findIndex((currentItem) => getMediaItemId(currentItem) === itemId);
-    setViewerIndex(index >= 0 ? index : 0);
-    setViewerVisible(true);
-  };
-
-  const openVideoViewer = (item) => {
-    setHasVideoFirstFrame(false);
-    setShowVideoCover(true);
-    setCurrentVideoThumbnailUri(getVideoThumbnailUri(item));
-    setCurrentVideoUri(getMediaUri(item));
-    setVideoViewerVisible(true);
-  };
-
-  const closeVideoViewer = useCallback(() => {
-    setVideoViewerVisible(false);
-    setCurrentVideoUri(null);
-    setCurrentVideoThumbnailUri(null);
-    setHasVideoFirstFrame(false);
-    setShowVideoCover(false);
-  }, []);
-
-  const deleteCurrentVideo = () => {
-    const currentVideo = filteredMediaItems.find(
-      (item) => getMediaUri(item) === currentVideoUri
-    );
-
-    if (!currentVideo || !canManageMedia) {
-      return;
-    }
-
-    Alert.alert("Move to Recycle Bin", "This video will be moved to Recycle Bin.", [
-      { text: "Cancel", style: "cancel" },
-      {
-        text: "Move",
-        style: "destructive",
-        onPress: () => {
-          moveMediaToRecycleBin(currentVideo);
-          closeVideoViewer();
-        },
-      },
-    ]);
-  };
+    console.log("VIDEO ITEM:", item);
+    const index = videos.findIndex(v => getMediaItemId(v) === itemId);
+    navigation.navigate("FullScreenVideo", {
+      mediaItems: videos,
+      initialIndex: index >= 0 ? index : 0,
+    });
+  }, [filteredMediaItems, navigation]);
 
   const handleDateChange = (_, selectedDate) => {
     if (Platform.OS === "android") {
@@ -400,34 +585,17 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
             return true;
           }
 
-          if (videoViewerVisible) {
-            closeVideoViewer();
-            return true;
-          }
-
-          navigation.reset({
-            index: 0,
-            routes: [{ name: "AuthProfile" }],
-          });
+          Alert.alert("Exit App", "Are you sure you want to exit Family Media Hub?", [
+            { text: "Cancel", style: "cancel", onPress: () => {} },
+            { text: "Exit", onPress: () => BackHandler.exitApp() },
+          ]);
           return true;
         }
       );
 
       return () => backSubscription.remove();
-    }, [closeVideoViewer, navigation, videoViewerVisible, viewerVisible])
+    }, [navigation, viewerVisible])
   );
-
-  useEffect(() => {
-    if (!videoViewerVisible || !currentVideoUri) {
-      return undefined;
-    }
-
-    const coverTimer = setTimeout(() => {
-      setShowVideoCover(false);
-    }, 900);
-
-    return () => clearTimeout(coverTimer);
-  }, [currentVideoUri, videoViewerVisible]);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -441,14 +609,16 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
         }
       />
 
-      <FlatList
-        data={groupedMedia}
-        keyExtractor={getMediaGroupKey}
+      <FlashList
+        data={galleryListItems}
+        keyExtractor={getGalleryListKey}
         showsVerticalScrollIndicator={false}
         contentContainerStyle={styles.scrollContent}
         initialNumToRender={4}
         maxToRenderPerBatch={5}
         windowSize={7}
+        estimatedItemSize={180}
+        removeClippedSubviews
         ListHeaderComponent={
           <>
             <SearchFilterBar
@@ -466,22 +636,23 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
                     <Ionicons name="sparkles" size={13} color={theme.primary} />
                     <Text style={[styles.sectionTitle, { color: theme.text }]}>Recent Highlights</Text>
                   </View>
-                  <TouchableOpacity onPress={() => navigation.navigate("Images")}>
+                  <TouchableOpacity onPress={() => navigation.setParams({ mediaTab: "Images" })}>
                     <Ionicons name="chevron-forward" size={17} color={theme.primary} />
                   </TouchableOpacity>
                 </View>
 
-                <FlatList
+                <FlashList
                   data={highlightItems}
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   keyExtractor={(item, index) => getMediaItemKey(item, index, "highlight")}
                   contentContainerStyle={styles.highlightsContent}
+                  estimatedItemSize={96}
                   renderItem={({ item }) => (
                     <ImageTile
                       uri={getMediaUri(item)}
                       style={styles.highlightCard}
-                      onPress={() => openViewer(item)}
+                      onPress={() => openViewer(item, imageItemIndexMap.identityMap.get(getMediaItemIdentity(item)))}
                       title={getFriendlyTitle(item, "Garden Play")}
                       meta={formatShortDate(getItemDate(item)).replace(",", "")}
                     />
@@ -498,125 +669,8 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
 
           </>
         }
-        renderItem={({ item: group, index }) => (
-          <FadeInView style={styles.group} delay={Math.min(index * 35, 160)}>
-            <View style={styles.groupHeader}>
-              <View style={styles.groupTitleWrap}>
-                <Ionicons name="calendar-outline" size={13} color={theme.primary} />
-                <Text style={[styles.groupTitle, { color: theme.text }]}>{group.title}</Text>
-                <Text style={[styles.groupDate, { color: theme.subText }]}>
-                  {formatShortDate(group.date)}
-                </Text>
-              </View>
-              <Ionicons name="chevron-down" size={16} color={theme.primary} />
-            </View>
-            {isGridView ? (
-              <FlatList
-                data={group.items}
-                keyExtractor={(item, itemIndex) => getMediaItemKey(item, itemIndex, `${group.title}-${index}`)}
-                numColumns={GRID_COLUMNS}
-                scrollEnabled={false}
-                columnWrapperStyle={styles.gridRow}
-                renderItem={({ item, index: itemIndex }) => (
-                  <TouchableOpacity
-                    activeOpacity={0.88}
-                    style={[
-                      styles.mediaTile,
-                      {
-                        width: mediaTileSize,
-                        height: mediaTileSize,
-                        marginRight:
-                          (itemIndex + 1) % GRID_COLUMNS === 0 ? 0 : GRID_GAP,
-                        marginBottom: GRID_GAP,
-                      },
-                    ]}
-                    onPress={() => {
-                      const category = getNormalizedCategory(item);
-                      if (category === "images") {
-                        openViewer(item);
-                      } else if (category === "videos") {
-                        openVideoViewer(item);
-                      } else if (category === "files") {
-                        navigation.navigate("Files");
-                      }
-                    }}
-                  >
-                    <View style={styles.mediaTileContent}>
-                      {getNormalizedCategory(item) === "images" && (
-                        <CachedImage source={{ uri: getMediaUri(item) }} style={styles.mediaPreview} />
-                      )}
-                      {getNormalizedCategory(item) === "videos" && (
-                        <>
-                          <VideoThumbnail item={item} style={styles.mediaPreview} />
-                          <PlayButton small />
-                        </>
-                      )}
-                      {getNormalizedCategory(item) === "files" && (
-                        <FileChip
-                          compact={false}
-                          name={item.original_file_name || item.stored_file_name || "Document"}
-                          type={item.content_type}
-                          size={getReadableSize(item)}
-                        />
-                      )}
-                      {getNormalizedCategory(item) !== "files" ? (
-                        <MediaBadge icon={getNormalizedCategory(item) === "videos" ? "time-outline" : "image-outline"}>
-                          {getNormalizedCategory(item) === "videos"
-                            ? formatDuration(item.duration)
-                            : ""}
-                        </MediaBadge>
-                      ) : null}
-                    </View>
-                  </TouchableOpacity>
-                )}
-              />
-            ) : (
-              <View style={styles.mediaList}>
-                {group.items.map((item, itemIndex) => {
-                  const category = getNormalizedCategory(item);
-                  return (
-                    <TouchableOpacity
-                      key={getMediaItemKey(item, itemIndex, `${group.title}-${index}-list`)}
-                      style={[styles.mediaListItem, { backgroundColor: theme.card }]}
-                      activeOpacity={0.88}
-                      onPress={() => {
-                        if (category === "images") {
-                          openViewer(item);
-                        } else if (category === "videos") {
-                          openVideoViewer(item);
-                        } else {
-                          navigation.navigate("Files");
-                        }
-                      }}
-                    >
-                      <View style={styles.mediaListPreview}>
-                        {category === "images" && (
-                          <CachedImage source={{ uri: getMediaUri(item) }} style={styles.mediaPreview} />
-                        )}
-                        {category === "videos" && (
-                          <VideoThumbnail item={item} style={styles.mediaPreview} />
-                        )}
-                        {category === "files" && (
-                          <View style={[styles.mediaPreview, styles.mediaFallback]}>
-                            <Ionicons name="document-text" size={22} color="#2563EB" />
-                          </View>
-                        )}
-                      </View>
-                      <View style={styles.mediaListText}>
-                        <Text style={[styles.mediaListTitle, { color: theme.text }]} numberOfLines={1}>
-                          {item.original_file_name || item.stored_file_name || "Media"}
-                        </Text>
-                        <Text style={[styles.mediaListMeta, { color: theme.subText }]}>
-                          {category} • {formatShortDate(getItemDate(item))}
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                  );
-                })}
-              </View>
-            )}
-          </FadeInView>
-        )}
+        renderItem={renderGalleryItem}
+
         ListEmptyComponent={
           !sceneReady || isMediaLoading ? (
             <View style={[styles.emptyState, { backgroundColor: theme.card }]}>
@@ -654,59 +708,6 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
         getImageTitle={(item) => item?.original_file_name || item?.stored_file_name || "Image"}
       />
 
-      {/* Video Viewer Modal */}
-      <Modal
-        visible={videoViewerVisible}
-        onRequestClose={closeVideoViewer}
-        animationType="none"
-      >
-        <View style={styles.videoModalContainer}>
-          <TouchableOpacity style={styles.closeButton} onPress={closeVideoViewer}>
-            <Ionicons name="close-circle" size={36} color="#fff" />
-          </TouchableOpacity>
-          {canManageMedia ? (
-            <TouchableOpacity style={styles.deleteButton} onPress={deleteCurrentVideo}>
-              <Ionicons name="trash" size={22} color="#FCA5A5" />
-            </TouchableOpacity>
-          ) : null}
-          {currentVideoUri ? (
-            <>
-              <ZoomableMedia
-                resetKey={currentVideoUri}
-                style={styles.fullScreenVideo}
-              >
-                <VideoPlayer
-                  key={currentVideoUri}
-                  source={currentVideoUri}
-                  style={styles.fullScreenVideo}
-                  contentFit="contain"
-                  nativeControls
-                  fullscreen={true} // Explicitly enable fullscreen
-                  shouldPlay={videoViewerVisible}
-                  surfaceType="textureView"
-                  posterSource={
-                    currentVideoThumbnailUri ? { uri: currentVideoThumbnailUri } : null
-                  }
-                  onFirstFrameRender={() => {
-                    setHasVideoFirstFrame(true);
-                    setShowVideoCover(false);
-                  }}
-                />
-              </ZoomableMedia>
-              {showVideoCover && !hasVideoFirstFrame && currentVideoThumbnailUri ? (
-                <View style={styles.videoLoadingCover} pointerEvents="none">
-                  <CachedImage
-                    source={{ uri: currentVideoThumbnailUri }}
-                    style={styles.fullScreenVideo}
-                    resizeMode="contain"
-                  />
-                  <ActivityIndicator size="large" color="#fff" style={styles.videoLoadingIndicator} />
-                </View>
-              ) : null}
-            </>
-          ) : null}
-        </View>
-      </Modal>
 
       <Modal visible={filterVisible} transparent animationType="fade" onRequestClose={() => setFilterVisible(false)}>
         <View style={styles.filterOverlay}>
@@ -829,97 +830,97 @@ const styles = StyleSheet.create({
     paddingBottom: 28,
   },
   avatar: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: moderateScale(34),
+    height: moderateScale(34),
+    borderRadius: moderateScale(17),
   },
   statsRow: {
     flexDirection: "row",
-    gap: 10,
-    marginHorizontal: SCREEN_HORIZONTAL_PADDING,
-    marginTop: 16,
+    gap: spacing.sm,
+    marginHorizontal: layout.screenPadding,
+    marginTop: spacing.lg,
   },
   highlightsContent: {
-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
-    paddingBottom: 4,
+    paddingHorizontal: layout.screenPadding,
+    paddingBottom: spacing.xs,
   },
   toolbarRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
-    marginBottom: 16,
+    gap: spacing.sm,
+    paddingHorizontal: layout.screenPadding,
+    marginBottom: spacing.lg,
   },
   searchBox: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: 14,
+    minHeight: moderateScale(46),
+    borderRadius: borderRadius.lg,
     borderWidth: 1,
-    paddingHorizontal: 12,
+    paddingHorizontal: spacing.md,
     flexDirection: "row",
     alignItems: "center",
   },
   searchInput: {
     flex: 1,
-    marginLeft: 8,
+    marginLeft: spacing.sm,
   },
   filterButton: {
-    width: 46,
-    height: 46,
-    borderRadius: 14,
+    width: moderateScale(46),
+    height: moderateScale(46),
+    borderRadius: borderRadius.lg,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
   },
   highlightCard: {
-    width: 72,
-    height: 72,
-    marginRight: 10,
-    borderRadius: 10,
+    width: moderateScale(72),
+    height: moderateScale(72),
+    marginRight: spacing.sm,
+    borderRadius: borderRadius.md,
   },
   statCard: {
     flex: 1,
     backgroundColor: "#fff",
-    borderRadius: 16,
-    paddingVertical: 16,
+    borderRadius: borderRadius.lg,
+    paddingVertical: spacing.md,
     alignItems: "center",
   },
   statValue: {
-    fontSize: 22,
+    fontSize: typography.heading,
     fontWeight: "700",
   },
   statLabel: {
-    marginTop: 4,
+    marginTop: spacing.xs,
     color: "#6B7280",
   },
   sectionHeader: {
-    marginTop: 4,
-    marginBottom: 8,
-    marginHorizontal: SCREEN_HORIZONTAL_PADDING,
+    marginTop: spacing.xs,
+    marginBottom: spacing.sm,
+    marginHorizontal: layout.screenPadding,
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
   },
   sectionTitle: {
-    fontSize: 12,
+    fontSize: typography.label,
     fontWeight: "800",
     color: "#111827",
   },
   sectionTitleRow: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
+    gap: spacing.xs,
   },
   link: {
     color: "#2563EB",
     fontWeight: "600",
   },
   group: {
-    marginBottom: 12,
+    marginBottom: spacing.md,
   },
   groupHeader: {
-    marginHorizontal: SCREEN_HORIZONTAL_PADDING,
-    marginBottom: 8,
+    marginHorizontal: layout.screenPadding,
+    marginBottom: spacing.sm,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
@@ -927,47 +928,77 @@ const styles = StyleSheet.create({
   groupTitleWrap: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 7,
+    gap: spacing.xs,
   },
   groupTitle: {
     color: ui.ink,
-    fontSize: 12,
+    fontSize: typography.label,
     fontWeight: "800",
   },
   groupDate: {
-    fontSize: 10,
+    fontSize: typography.caption,
     fontWeight: "700",
   },
   gridRow: {
+    flexDirection: "row",
     justifyContent: "flex-start",
-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
+    paddingHorizontal: layout.screenPadding,
   },
   mediaTile: {
-    borderRadius: 8,
+    borderRadius: borderRadius.sm,
     overflow: "hidden",
     backgroundColor: "#E9E7F5",
   },
+  fileCard: {
+    borderRadius: moderateScale(12),
+    overflow: "hidden",
+    ...softShadow,
+  },
+  cardPreview: {
+    flex: 1,
+    backgroundColor: "#F9FAFB",
+    justifyContent: "center",
+    alignItems: "center",
+  },
+  cardInfo: {
+    padding: moderateScale(6),
+  },
+  fileName: {
+    fontSize: moderateScale(10),
+    fontWeight: "700",
+  },
+  fileMeta: {
+    marginTop: 2,
+    fontSize: moderateScale(8),
+    fontWeight: "500",
+  },
+  iconLarge: {
+    width: "100%",
+    height: "100%",
+    justifyContent: "center",
+    alignItems: "center",
+  },
   mediaList: {
-    paddingHorizontal: SCREEN_HORIZONTAL_PADDING,
+    paddingHorizontal: layout.screenPadding,
   },
   mediaListItem: {
-    minHeight: 82,
-    borderRadius: 15,
-    padding: 10,
-    marginBottom: 10,
+    minHeight: moderateScale(82),
+    borderRadius: borderRadius.lg,
+    padding: spacing.md,
+    marginBottom: spacing.sm,
     flexDirection: "row",
     alignItems: "center",
   },
   mediaListPreview: {
-    width: 62,
-    height: 62,
-    borderRadius: 12,
+    width: moderateScale(62),
+    height: moderateScale(62),
+    borderRadius: borderRadius.md,
     overflow: "hidden",
     backgroundColor: "#E5E7EB",
   },
   mediaListText: {
     flex: 1,
-    marginLeft: 12,
+    marginLeft: spacing.md,
   },
   mediaListTitle: {
     fontSize: 14,
@@ -990,60 +1021,23 @@ const styles = StyleSheet.create({
   },
   emptyState: {
     backgroundColor: "#fff",
-    marginHorizontal: SCREEN_HORIZONTAL_PADDING,
-    borderRadius: 20,
-    padding: 24,
+    marginHorizontal: layout.screenPadding,
+    borderRadius: borderRadius.xl,
+    padding: spacing.lg,
     alignItems: "center",
-    marginTop: 12,
+    marginTop: spacing.sm,
   },
   emptyTitle: {
-    marginTop: 12,
+    marginTop: spacing.sm,
     fontWeight: "700",
-    fontSize: 18,
+    fontSize: typography.title,
     color: "#111827",
   },
   emptySubtitle: {
-    marginTop: 8,
+    marginTop: spacing.sm,
     color: "#6B7280",
     textAlign: "center",
-    lineHeight: 20,
-  },
-  videoModalContainer: {
-    flex: 1,
-    backgroundColor: "#000",
-    justifyContent: "center",
-    alignItems: "center",
-  },
-  fullScreenVideo: {
-    width: "100%",
-    height: "100%",
-  },
-  videoLoadingCover: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: "#000",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  closeButton: {
-    position: "absolute",
-    top: 40, // Adjust as needed for safe area
-    right: 20,
-    zIndex: 1,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    borderRadius: 20,
-    padding: 2,
-  },
-  deleteButton: {
-    position: "absolute",
-    top: 42,
-    left: 20,
-    zIndex: 1,
-    width: 38,
-    height: 38,
-    borderRadius: 19,
-    backgroundColor: "rgba(0,0,0,0.5)",
-    alignItems: "center",
-    justifyContent: "center",
+    lineHeight: typography.body * 1.25,
   },
   mediaTileContent: {
     flex: 1,
@@ -1059,81 +1053,81 @@ const styles = StyleSheet.create({
     backgroundColor: "rgba(0,0,0,0.42)",
   },
   filterPanel: {
-    borderTopLeftRadius: 22,
-    borderTopRightRadius: 22,
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 22,
+    borderTopLeftRadius: borderRadius.xl,
+    borderTopRightRadius: borderRadius.xl,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.md,
+    paddingBottom: spacing.lg,
   },
   filterHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: 18,
+    marginBottom: spacing.lg,
   },
   filterTitle: {
-    fontSize: 18,
+    fontSize: typography.title,
     fontWeight: "800",
   },
   iconButton: {
-    width: 36,
-    height: 36,
+    width: moderateScale(36),
+    height: moderateScale(36),
     alignItems: "center",
     justifyContent: "center",
   },
   filterLabel: {
-    marginBottom: 8,
-    fontSize: 12,
+    marginBottom: spacing.xs,
+    fontSize: typography.caption,
     fontWeight: "800",
     textTransform: "uppercase",
   },
   dateRangeRow: {
     flexDirection: "row",
-    gap: 10,
-    marginBottom: 18,
+    gap: spacing.sm,
+    marginBottom: spacing.lg,
   },
   dateButton: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: 14,
+    minHeight: moderateScale(46),
+    borderRadius: borderRadius.lg,
     borderWidth: 1,
-    paddingHorizontal: 12,
+    paddingHorizontal: spacing.sm,
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
+    gap: spacing.sm,
   },
   dateButtonText: {
     flex: 1,
-    fontSize: 13,
+    fontSize: typography.label,
     fontWeight: "700",
   },
   segmentedControl: {
     flexDirection: "row",
-    borderRadius: 14,
-    padding: 4,
-    marginBottom: 18,
+    borderRadius: borderRadius.lg,
+    padding: spacing.xs,
+    marginBottom: spacing.lg,
   },
   segmentButton: {
     flex: 1,
-    minHeight: 42,
-    borderRadius: 11,
+    minHeight: moderateScale(42),
+    borderRadius: borderRadius.sm,
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: spacing.sm,
   },
   segmentText: {
-    fontSize: 13,
+    fontSize: typography.label,
     fontWeight: "800",
   },
   filterActions: {
     flexDirection: "row",
-    gap: 10,
+    gap: spacing.sm,
   },
   clearButton: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: 14,
+    minHeight: moderateScale(46),
+    borderRadius: borderRadius.lg,
     borderWidth: 1,
     alignItems: "center",
     justifyContent: "center",
@@ -1143,8 +1137,8 @@ const styles = StyleSheet.create({
   },
   applyButton: {
     flex: 1,
-    minHeight: 46,
-    borderRadius: 14,
+    minHeight: moderateScale(46),
+    borderRadius: borderRadius.lg,
     alignItems: "center",
     justifyContent: "center",
   },
