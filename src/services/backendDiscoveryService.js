@@ -1,5 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Network from "expo-network";
+import { API_BASE_URL } from "../config/env";
 
 const STORAGE_KEYS = {
   baseUrl: "@family-media-hub/backend-base-url",
@@ -11,6 +12,7 @@ const HEALTH_PATH = "/health";
 const EXPECTED_SERVICE = "my-backend";
 const REQUEST_TIMEOUT_MS = 1500;
 const SCAN_BATCH_SIZE = 16;
+const CONFIGURED_BASE_URL = String(API_BASE_URL || "").replace(/\/+$/, "");
 
 let activeBaseUrl = null;
 let activeSubnet = null;
@@ -29,6 +31,12 @@ export const getCurrentBackendBaseUrl = () => activeBaseUrl;
 
 export const getActiveBackendBaseUrl = async () => {
   if (activeBaseUrl) {
+    return activeBaseUrl;
+  }
+
+  if (CONFIGURED_BASE_URL) {
+    activeBaseUrl = CONFIGURED_BASE_URL;
+    notifyListeners();
     return activeBaseUrl;
   }
 
@@ -138,6 +146,19 @@ const scanSubnet = async (subnetPrefix, onProgress) => {
 };
 
 export const discoverBackend = async ({ force = false, onProgress } = {}) => {
+  if (CONFIGURED_BASE_URL) {
+    const found = await checkBackend(CONFIGURED_BASE_URL);
+    await setActiveBackend(found ? CONFIGURED_BASE_URL : null, found ? "configured" : null);
+
+    return {
+      baseUrl: found ? CONFIGURED_BASE_URL : null,
+      ipAddress: null,
+      subnet: null,
+      status: found ? "found" : "not-found",
+      message: found ? "" : `Backend not found at ${CONFIGURED_BASE_URL}`,
+    };
+  }
+
   const ipAddress = await Network.getIpAddressAsync();
   const subnetPrefix = getSubnetPrefix(ipAddress);
 

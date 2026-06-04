@@ -69,6 +69,25 @@ const fileIcon = {
   file: "document-text-outline",
 };
 
+const getPreviewSource = (item, token) => {
+  const uri = getMediaUri(item);
+
+  if (!uri) {
+    return null;
+  }
+
+  if (item.requires_auth && token) {
+    return {
+      uri,
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    };
+  }
+
+  return { uri };
+};
+
 export default function BackupDashboardScreen({ navigation, onOpenMenu }) {
   const { authToken } = useAuth();
   const { viewerProfile } = useProfile();
@@ -270,14 +289,15 @@ export default function BackupDashboardScreen({ navigation, onOpenMenu }) {
               const kind = getFileKind(item);
               const status = String(item.status || "").toUpperCase();
               const isProcessing = status === "UPLOADING" || status === "PENDING" || item.is_processing;
+              const previewSource = getPreviewSource(item, authToken);
 
               return (
                 <View key={item.id || item.file_name || index} style={styles.recentCard}>
                   <View style={styles.previewBox}>
-                    {kind === "photo" || kind === "video" ? (
+                    {(kind === "photo" || kind === "video") && previewSource ? (
                       <>
                         <Image
-                          source={{ uri: getMediaUri(item) }}
+                          source={previewSource}
                           style={[styles.previewImage, isProcessing && { opacity: 0.6 }]}
                           resizeMode="cover"
                         />

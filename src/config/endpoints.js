@@ -67,6 +67,7 @@ export const ENDPOINTS = {
           ? `?device_id=${encodeURIComponent(deviceId)}`
           : ""
       }`,
+    file: (fileId) => `/backup/file/${encodeURIComponent(fileId)}`,
     list: "/backup/list",
   },
 };

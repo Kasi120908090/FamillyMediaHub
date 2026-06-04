@@ -18,32 +18,58 @@ const getBytesReceived = (response) =>
       0
   );
 
-const normalizeBackupItem = (item = {}) => ({
-  ...item,
-  // Normalize ID and basic metadata
-  id: item.id || item.backup_id || item.upload_id || item.file_id || item.uuid,
-  file_name:
-    item.file_name || item.filename || item.name || item.original_file_name || item.original_name || "Backup file",
-  file_size: Number(item.file_size || item.size || item.bytes || item.fileSize || 0),
-  duration: Number(item.duration || 0),
-  content_type: item.content_type || item.mime_type || item.mimeType || "application/octet-stream",
-  status: item.status || item.state || item.upload_status || "UNKNOWN",
-  completed_at:
-    item.completed_at || item.uploaded_at || item.created_at || item.timestamp || item.createdAt || "",
-  
-  // Ensure pathing is consistent for the media utilities
-  file_path: item.file_path || item.path || item.uri || item.url || item.download_url || item.fileUri || item.stored_file_name,
-  uri: item.uri || item.url || item.local_uri || item.file_path || item.path || item.stored_file_name,
-  
-  stored_file_name: item.stored_file_name || item.file_name || item.filename,
-  
-  // Add kind/category for filtering in Gallery/Images screens
-  kind: (item.content_type?.startsWith('video/') || /\.(mp4|mov|mkv|avi)$/i.test(item.file_name)) ? 'video' : 
-        (item.content_type?.startsWith('image/') || /\.(jpg|jpeg|png|heic|webp)$/i.test(item.file_name)) ? 'photo' : 'file',
+const normalizeBackupItem = (item = {}) => {
+  const id = item.id || item.backup_id || item.upload_id || item.file_id || item.uuid;
+  const fileName =
+    item.file_name || item.filename || item.name || item.original_file_name || item.original_name || "Backup file";
+  const contentType = item.content_type || item.mime_type || item.mimeType || "application/octet-stream";
+  const status = item.status || item.state || item.upload_status || "UNKNOWN";
+  const isComplete = String(status).toUpperCase() === "COMPLETE";
+  const backupFilePath = isComplete && id ? ENDPOINTS.backup.file(id) : null;
 
-  // Flag for UI to show "Processing" label
-  is_processing: (item.status || "").toUpperCase() !== "COMPLETE" && (item.status || "").toUpperCase() !== "SUCCESS",
-});
+  return {
+    ...item,
+    // Normalize ID and basic metadata
+    id,
+    file_name: fileName,
+    file_size: Number(item.file_size || item.size || item.bytes || item.fileSize || 0),
+    duration: Number(item.duration || 0),
+    content_type: contentType,
+    status,
+    completed_at:
+      item.completed_at || item.uploaded_at || item.created_at || item.timestamp || item.createdAt || "",
+    
+    // Ensure pathing is consistent for the media utilities
+    file_path:
+      backupFilePath ||
+      item.file_path ||
+      item.path ||
+      item.uri ||
+      item.url ||
+      item.download_url ||
+      item.fileUri ||
+      item.stored_file_name,
+    uri:
+      backupFilePath ||
+      item.uri ||
+      item.url ||
+      item.local_uri ||
+      item.file_path ||
+      item.path ||
+      item.stored_file_name,
+    backup_file_path: backupFilePath,
+    requires_auth: Boolean(backupFilePath),
+    
+    stored_file_name: item.stored_file_name || item.file_name || item.filename,
+    
+    // Add kind/category for filtering in Gallery/Images screens
+    kind: (contentType?.startsWith('video/') || /\.(mp4|mov|mkv|avi)$/i.test(fileName)) ? 'video' : 
+          (contentType?.startsWith('image/') || /\.(jpg|jpeg|png|heic|webp)$/i.test(fileName)) ? 'photo' : 'file',
+
+    // Flag for UI to show "Processing" label
+    is_processing: String(status).toUpperCase() !== "COMPLETE" && String(status).toUpperCase() !== "SUCCESS",
+  };
+};
 
 const getBackupItems = (response) => {
   const items = Array.isArray(response) ? response : response?.items || response?.backups || response?.data || [];
