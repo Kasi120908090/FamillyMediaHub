@@ -42,8 +42,8 @@ const createDevicePayload = (user) => {
     Platform.OS === "android"
       ? "Android phone"
       : Platform.OS === "ios"
-      ? "iPhone"
-      : "Current device";
+        ? "iPhone"
+        : "Current device";
   const userKey = user?.id || user?.username || "user";
 
   return {
@@ -76,8 +76,23 @@ export function useBackupAutoSync({ authToken, currentUser, parentDevices, refre
       }
     };
 
+    const stopAutoSync = async () => {
+      stopTimer();
+      latestContextRef.current = null;
+      await backupAutoSyncService.stopNow().catch(() => {});
+      await backupBackgroundTask.saveContext(null).catch(() => {});
+      await backupBackgroundTask.unregister?.().catch(() => {});
+    };
+
     const run = async () => {
       if (!latestContextRef.current) {
+        return;
+      }
+
+      const enabled = await backupAutoSyncService.isEnabled().catch(() => false);
+
+      if (!enabled) {
+        await stopAutoSync();
         return;
       }
 
@@ -122,6 +137,14 @@ export function useBackupAutoSync({ authToken, currentUser, parentDevices, refre
       if (!authToken || !currentUser) {
         latestContextRef.current = null;
         await backupBackgroundTask.saveContext(null);
+        await backupBackgroundTask.unregister?.().catch(() => {});
+        return;
+      }
+
+      const settings = await backupAutoSyncService.getSettings();
+
+      if (!isMounted || !settings.enabled) {
+        await stopAutoSync();
         return;
       }
 
@@ -130,14 +153,14 @@ export function useBackupAutoSync({ authToken, currentUser, parentDevices, refre
       if (!resolvedDeviceId) {
         latestContextRef.current = null;
         await backupBackgroundTask.saveContext(null);
+        await backupBackgroundTask.unregister?.().catch(() => {});
         return;
       }
 
-      const settings = await backupAutoSyncService.getSettings();
+      const stillEnabled = await backupAutoSyncService.isEnabled().catch(() => false);
 
-      if (!isMounted || !settings.enabled) {
-        latestContextRef.current = null;
-        await backupBackgroundTask.saveContext(null);
+      if (!isMounted || !stillEnabled) {
+        await stopAutoSync();
         return;
       }
 
@@ -161,10 +184,19 @@ export function useBackupAutoSync({ authToken, currentUser, parentDevices, refre
       );
     };
 
-    const subscription = AppState.addEventListener("change", (state) => {
-      if (state === "active") {
-        run();
+    const subscription = AppState.addEventListener("change", async (state) => {
+      if (state !== "active") {
+        return;
       }
+
+      const enabled = await backupAutoSyncService.isEnabled().catch(() => false);
+
+      if (!enabled) {
+        await stopAutoSync();
+        return;
+      }
+
+      run();
     });
 
     start();

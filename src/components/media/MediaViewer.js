@@ -39,6 +39,7 @@ export default function MediaViewer({
   onClose,
   onDelete,
   getImageUri,
+  getImageSource,
   getImageTitle,
 }) {
   const pagerRef = useRef(null);
@@ -180,7 +181,7 @@ export default function MediaViewer({
                   onSwipeDown={handleClose}
                 >
                   <CachedImage
-                    source={{ uri: getImageUri(item) }}
+                    source={getImageSource ? getImageSource(item) : { uri: getImageUri(item) }}
                     style={[styles.image, { width, height }]}
                     resizeMode="contain"
                   />

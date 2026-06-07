@@ -8,7 +8,6 @@ import {
   Share,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
   useWindowDimensions,
@@ -24,7 +23,6 @@ import ImageViewer from "../../components/media/ImageViewer";
 import VideoFullScreenViewer from "../../components/media/VideoFullScreenViewer";
 import AppHeader from "../../components/navigation/AppHeader";
 import {
-  FileChip,
   SearchFilterBar,
   getFileTone,
   getFriendlyTitle,
@@ -32,12 +30,12 @@ import {
   softShadow,
   ui,
 } from "../../components/media/MediaDesign";
-import { borderRadius, spacing, typography } from "../../theme/designSystem";
 import { moderateScale } from "../../theme/responsive";
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { resolveMediaUri } from "../../services/api";
 import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
+import { getMediaSource } from "../../utils/media";
 import { getOrCreateVideoThumbnailUri } from "../../utils/videoThumbnails";
 
 const getFileItemKey = (item, index) => {
@@ -76,19 +74,6 @@ const isVideoExtension = (value) => {
   return ["mp4", "mov", "avi", "mkv", "webm", "3gp", "flv", "mts", "m4v"].includes(extension);
 };
 
-const getFileOpenCategory = (item) => {
-  const fileName = String(item?.original_file_name || item?.stored_file_name || item?.file_path || item?.path || "");
-  const contentType = getContentType(item);
-  const extension = getFileExtension(fileName || getFileUri(item));
-
-  if (contentType.startsWith("image/") || isImageExtension(fileName)) return "image";
-  if (contentType.startsWith("video/") || isVideoExtension(fileName)) return "video";
-  if (extension === "pdf" || contentType.includes("pdf")) return "pdf";
-  if (extension === "txt" || contentType.includes("text/plain")) return "txt";
-  if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(extension)) return "office";
-  return "external";
-};
-
 const getFileUri = (item) => {
   const serverPath = firstValue(
     item?.file_url,
@@ -117,6 +102,19 @@ const getFileUri = (item) => {
         item?.file_path,
         item?.path
       ) || null;
+};
+
+const getFileOpenCategory = (item) => {
+  const fileName = String(item?.original_file_name || item?.stored_file_name || item?.file_path || item?.path || "");
+  const contentType = getContentType(item);
+  const extension = getFileExtension(fileName || getFileUri(item));
+
+  if (contentType.startsWith("image/") || isImageExtension(fileName)) return "image";
+  if (contentType.startsWith("video/") || isVideoExtension(fileName)) return "video";
+  if (extension === "pdf" || contentType.includes("pdf")) return "pdf";
+  if (extension === "txt" || contentType.includes("text/plain")) return "txt";
+  if (["doc", "docx", "xls", "xlsx", "ppt", "pptx"].includes(extension)) return "office";
+  return "external";
 };
 
 const getMediaChildId = (item) =>
@@ -174,23 +172,13 @@ const formatShortDate = (date) =>
 export default function FilesScreen({ navigation, onOpenMenu }) {
   const {
     viewerProfile,
-    mediaItems,
+    mediaItems = [],
     selectedChildId,
     canManageMedia,
     isChildAccount,
+    authToken,
     moveMediaToRecycleBin,
   } = useProfile();
-  const renderCounter = useRef(0);
-  renderCounter.current += 1;
-
-  useEffect(() => {
-    console.log("[Perf] FilesScreen mount", {
-      renderCount: renderCounter.current,
-      mediaItemsCount: mediaItems.length,
-      selectedChildId,
-    });
-    return () => console.log("[Perf] FilesScreen unmount");
-  }, []);
 
   const { theme } = useTheme();
   const { width: windowWidth } = useWindowDimensions();
@@ -207,21 +195,21 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
   const [selectedVideoThumbnailUri, setSelectedVideoThumbnailUri] = useState(null);
   const [sceneReady, setSceneReady] = useState(false);
 
-  const isTablet = windowWidth >= 768;
-  const numColumns = isTablet ? 4 : 2;
-
   useEffect(() => {
-    setSceneReady(false);
     const task = InteractionManager.runAfterInteractions(() => {
       setSceneReady(true);
     });
-
     return () => task.cancel();
   }, []);
 
+  const getAuthenticatedFileSource = useCallback(
+    (item) => getMediaSource(item, authToken, getFileUri(item)),
+    [authToken]
+  );
+
   const files = useMemo(() => {
-    console.time("[Perf] Files filteredFiles");
-    const result = (sceneReady ? mediaItems : [])
+    const items = Array.isArray(mediaItems) ? mediaItems : [];
+    return (sceneReady ? items : [])
       .filter((item) => isFileUpload(item))
       .filter(
         (item) => {
@@ -249,17 +237,11 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
             ? getItemDate(firstItem) - getItemDate(secondItem)
             : getItemDate(secondItem) - getItemDate(firstItem)
         );
-    console.timeEnd("[Perf] Files filteredFiles");
-    return result;
   }, [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]);
-
-  const recentFiles = useMemo(() => {
-    return files.slice(0, 5);
-  }, [files]);
 
   const hasActiveFilters = Boolean(startDate || endDate || isDateReversed);
 
-  const handleDateChange = (_, selectedDate) => {
+  const handleDateChange = useCallback((_, selectedDate) => {
     if (Platform.OS === "android") {
       setDatePickerTarget(null);
     }
@@ -279,14 +261,14 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
         setStartDate(selectedDate);
       }
     }
-  };
+  }, [datePickerTarget, endDate, startDate]);
 
-  const clearFilters = () => {
+  const clearFilters = useCallback(() => {
     setStartDate(null);
     setEndDate(null);
     setDatePickerTarget(null);
     setIsDateReversed(false);
-  };
+  }, []);
 
   const getFileTitle = useCallback(
     (item) => item?.original_file_name || item?.stored_file_name || "Document",
@@ -384,7 +366,7 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
   }, [openExternalFile]);
 
   const renderFileItem = useCallback(
-    ({ item, index }) => {
+    ({ item }) => {
       const fileName = item.original_file_name || item.stored_file_name || "Document";
       const contentType = getContentType(item);
       const isImage = contentType.startsWith("image/") || isImageExtension(fileName);
@@ -399,7 +381,7 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
         >
           <View style={styles.cardPreview}>
             {isImage ? (
-              <CachedImage source={{ uri: getFileUri(item) }} style={styles.previewContent} resizeMode="cover" />
+              <CachedImage source={getAuthenticatedFileSource(item)} style={styles.previewContent} resizeMode="cover" />
             ) : isVideo ? (
               <VideoThumbnail item={item} style={styles.previewContent} small />
             ) : (
@@ -422,7 +404,7 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
           </View>
       </TouchableOpacity>
     );
-    }, [openFileDirectly, showFileActions, theme]
+    }, [getAuthenticatedFileSource, openFileDirectly, showFileActions, theme]
   );
 
   return (
@@ -432,7 +414,7 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
         onOpenMenu={onOpenMenu}
         rightContent={
           <TouchableOpacity onPress={() => navigation.navigate("Profile")} activeOpacity={0.85}>
-            <ThemedAvatar uri={viewerProfile.image} name={viewerProfile.name} style={styles.avatar} />
+            <ThemedAvatar uri={viewerProfile?.image} name={viewerProfile?.name} style={styles.avatar} />
           </TouchableOpacity>
         }
       />
@@ -555,6 +537,7 @@ export default function FilesScreen({ navigation, onOpenMenu }) {
         onClose={() => setSelectedImageFile(null)}
         onDelete={canManageMedia ? moveMediaToRecycleBin : null}
         getImageUri={getFileUri}
+        getImageSource={getAuthenticatedFileSource}
         getImageTitle={getFileTitle}
       />
 
@@ -617,28 +600,27 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingBottom: 100,
-    paddingHorizontal: spacing.md,
   },
   headerContainer: {
-    paddingTop: spacing.sm,
+    paddingTop: 8,
   },
   section: {
-    marginVertical: spacing.md,
+    marginVertical: 16,
   },
   sectionTitle: {
-    fontSize: typography.label,
+    fontSize: 14,
     fontWeight: "800",
-    marginBottom: spacing.sm,
-    marginLeft: spacing.xs,
+    marginBottom: 8,
+    marginLeft: 4,
   },
   recentScroll: {
-    paddingLeft: spacing.xs,
-    gap: spacing.sm,
+    paddingLeft: 4,
+    gap: 12,
   },
   recentCard: {
     width: moderateScale(110),
-    padding: spacing.sm,
-    borderRadius: borderRadius.lg,
+    padding: 12,
+    borderRadius: 12,
     alignItems: "center",
     justifyContent: "center",
   },
@@ -649,7 +631,7 @@ const styles = StyleSheet.create({
     backgroundColor: "#F3F0FF",
     alignItems: "center",
     justifyContent: "center",
-    marginBottom: spacing.xs,
+    marginBottom: 4,
   },
   recentName: {
     fontSize: 11,
@@ -660,8 +642,8 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     justifyContent: "space-between",
     alignItems: "center",
-    marginTop: spacing.sm,
-    marginBottom: spacing.xs,
+    marginTop: 8,
+    marginBottom: 4,
   },
   fileCount: {
     fontSize: 12,
@@ -669,7 +651,7 @@ const styles = StyleSheet.create({
   },
   fileGridCard: {
     flex: 1,
-    margin: spacing.xs,
+    margin: 4,
     borderRadius: moderateScale(16),
     overflow: "hidden",
   },
@@ -690,7 +672,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
   },
   cardInfo: {
-    padding: spacing.sm,
+    padding: 8,
   },
   fileName: {
     fontSize: 12,

@@ -212,9 +212,9 @@ export const FileChip = memo(({ name, type, size, compact = false }) => {
   );
 });
 
-export const ImageTile = memo(({ uri, style, onPress, title, meta, children }) => (
+export const ImageTile = memo(({ uri, source, style, onPress, title, meta, children }) => (
   <Pressable style={[sharedStyles.imageTile, softShadow, style]} onPress={onPress}>
-    <CachedImage source={{ uri }} style={sharedStyles.tileImage} resizeMode="cover" />
+    <CachedImage source={source || { uri }} style={sharedStyles.tileImage} resizeMode="cover" />
     <View style={sharedStyles.tileShade} />
     {title ? (
       <View style={sharedStyles.tileText}>

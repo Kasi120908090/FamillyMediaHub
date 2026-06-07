@@ -6,7 +6,6 @@ import {
   Platform,
   StyleSheet,
   Text,
-  TextInput,
   TouchableOpacity,
   View,
 } from "react-native";
@@ -18,10 +17,7 @@ import AppHeader from "../../components/navigation/AppHeader";
 import VideoThumbnail from "../../components/media/VideoThumbnail";
 import {
   FadeInView,
-  MediaBadge,
-  PlayButton,
   SearchFilterBar,
-  formatDuration,
   getFriendlyTitle,
   softShadow,
   ui,
@@ -29,8 +25,6 @@ import {
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { SCREEN_HORIZONTAL_PADDING } from "../../theme/spacing";
-import { getMediaUri, getVideoThumbnailUri } from "../../utils/media";
-import { getOrCreateVideoThumbnailUri } from "../../utils/videoThumbnails";
 
 const getVideoItemKey = (item, index) => {
   const stablePart =
@@ -105,23 +99,11 @@ const getMediaChildId = (item) =>
 export default function VideosScreen({ navigation, onOpenMenu }) {
   const {
     viewerProfile,
-    mediaItems,
+    mediaItems = [],
     selectedChildId,
-    canManageMedia,
     isChildAccount,
-    moveMediaToRecycleBin,
   } = useProfile();
-  const renderCounter = useRef(0);
-  renderCounter.current += 1;
 
-  useEffect(() => {
-    console.log("[Perf] VideosScreen mount", {
-      renderCount: renderCounter.current,
-      mediaItemsCount: mediaItems.length,
-      selectedChildId,
-    });
-    return () => console.log("[Perf] VideosScreen unmount");
-  }, []);
   const { theme } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
   const [filterVisible, setFilterVisible] = useState(false);
@@ -133,17 +115,15 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
   const [sceneReady, setSceneReady] = useState(false);
 
   useEffect(() => {
-    setSceneReady(false);
     const task = InteractionManager.runAfterInteractions(() => {
       setSceneReady(true);
     });
-
     return () => task.cancel();
   }, []);
 
   const videos = useMemo(() => {
-    console.time("[Perf] Videos filteredVideos");
-    const result = (sceneReady ? mediaItems : [])
+    const items = Array.isArray(mediaItems) ? mediaItems : [];
+    return (sceneReady ? items : [])
       .filter(
         (item) => {
           if (!isChildAccount || !selectedChildId) {
@@ -173,12 +153,9 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
             ? getItemDate(firstItem) - getItemDate(secondItem)
             : getItemDate(secondItem) - getItemDate(firstItem)
         );
-    console.timeEnd("[Perf] Videos filteredVideos");
-    return result;
   }, [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]);
 
   const groupedVideos = useMemo(() => {
-    console.time("[Perf] Videos groupedVideos");
     const groups = {};
 
     videos.forEach((item) => {
@@ -205,26 +182,24 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
       ),
     }));
 
-    const result = grouped.sort((firstGroup, secondGroup) =>
+    return grouped.sort((firstGroup, secondGroup) =>
       isDateReversed
         ? firstGroup.date - secondGroup.date
         : secondGroup.date - firstGroup.date
     );
-    console.timeEnd("[Perf] Videos groupedVideos");
-    return result;
   }, [videos, isDateReversed]);
 
   const hasActiveFilters = Boolean(startDate || endDate || isGridView || isDateReversed);
 
-  const openVideo = (item) => {
+  const openVideo = useCallback((item) => {
     const index = videos.findIndex((v) => v.id === item.id);
     navigation.navigate("FullScreenVideo", {
       mediaItems: videos,
       initialIndex: index >= 0 ? index : 0,
     });
-  };
+  }, [navigation, videos]);
 
-  const handleDateChange = (_, selectedDate) => {
+  const handleDateChange = useCallback((_, selectedDate) => {
     if (Platform.OS === "android") {
       setDatePickerTarget(null);
     }
@@ -244,14 +219,14 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
         setStartDate(selectedDate);
       }
     }
-  };
+  }, [datePickerTarget, endDate, startDate]);
 
-  const clearFilters = () => {
+  const clearFilters = useCallback(() => {
     setStartDate(null);
     setEndDate(null);
     setDatePickerTarget(null);
     setIsDateReversed(false);
-  };
+  }, []);
 
   const renderVideoCard = useCallback(
     (item, index, sectionTitle) => {
@@ -321,10 +296,10 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
 
       {isGridView ? (
         <View style={styles.gridWrap}>
-          {section.data.map((item, index) => renderVideoCard(item, index, section.title))}
+          {section.data.map((item, idx) => renderVideoCard(item, idx, section.title))}
         </View>
       ) : (
-        section.data.map((item, index) => renderVideoCard(item, index, section.title))
+        section.data.map((item, idx) => renderVideoCard(item, idx, section.title))
       )}
     </FadeInView>
   ),
@@ -338,7 +313,7 @@ export default function VideosScreen({ navigation, onOpenMenu }) {
         onOpenMenu={onOpenMenu}
         rightContent={
           <TouchableOpacity onPress={() => navigation.navigate("Profile")} activeOpacity={0.85}>
-            <ThemedAvatar uri={viewerProfile.image} name={viewerProfile.name} style={styles.avatar} />
+            <ThemedAvatar uri={viewerProfile?.image} name={viewerProfile?.name} style={styles.avatar} />
           </TouchableOpacity>
         }
       />

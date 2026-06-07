@@ -5,6 +5,7 @@ import { BACKUP_QUEUE_STATUS, backupQueueMetaStore, backupQueueStore } from "./b
 import { Sha256, base64ToBytes } from "../utils/sha256";
 
 const DEFAULT_CHUNK_SIZE = 4 * 1024 * 1024;
+const STOPPED_REASON = "auto sync is disabled";
 
 const getUploadId = (response) =>
   response?.upload_id || response?.uploadId || response?.id || null;
@@ -18,6 +19,26 @@ const getBytesReceived = (response) =>
       0
   );
 
+const shouldContinueSync = async (options = {}) => {
+  if (options.signal?.aborted) {
+    return false;
+  }
+
+  if (typeof options.shouldContinue === "function") {
+    return Boolean(await options.shouldContinue());
+  }
+
+  return true;
+};
+
+const throwIfStopped = async (options = {}) => {
+  if (!(await shouldContinueSync(options))) {
+    const error = new Error(STOPPED_REASON);
+    error.name = "SyncStoppedError";
+    throw error;
+  }
+};
+
 const normalizeBackupItem = (item = {}) => {
   const id = item.id || item.backup_id || item.upload_id || item.file_id || item.uuid;
   const fileName =
@@ -29,7 +50,6 @@ const normalizeBackupItem = (item = {}) => {
 
   return {
     ...item,
-    // Normalize ID and basic metadata
     id,
     file_name: fileName,
     file_size: Number(item.file_size || item.size || item.bytes || item.fileSize || 0),
@@ -38,8 +58,6 @@ const normalizeBackupItem = (item = {}) => {
     status,
     completed_at:
       item.completed_at || item.uploaded_at || item.created_at || item.timestamp || item.createdAt || "",
-    
-    // Ensure pathing is consistent for the media utilities
     file_path:
       backupFilePath ||
       item.file_path ||
@@ -59,14 +77,13 @@ const normalizeBackupItem = (item = {}) => {
       item.stored_file_name,
     backup_file_path: backupFilePath,
     requires_auth: Boolean(backupFilePath),
-    
     stored_file_name: item.stored_file_name || item.file_name || item.filename,
-    
-    // Add kind/category for filtering in Gallery/Images screens
-    kind: (contentType?.startsWith('video/') || /\.(mp4|mov|mkv|avi)$/i.test(fileName)) ? 'video' : 
-          (contentType?.startsWith('image/') || /\.(jpg|jpeg|png|heic|webp)$/i.test(fileName)) ? 'photo' : 'file',
-
-    // Flag for UI to show "Processing" label
+    kind:
+      contentType?.startsWith("video/") || /\.(mp4|mov|mkv|avi)$/i.test(fileName)
+        ? "video"
+        : contentType?.startsWith("image/") || /\.(jpg|jpeg|png|heic|webp)$/i.test(fileName)
+          ? "photo"
+          : "file",
     is_processing: String(status).toUpperCase() !== "COMPLETE" && String(status).toUpperCase() !== "SUCCESS",
   };
 };
@@ -193,7 +210,7 @@ const uploadChunk = async ({ uploadId, item, token, start, end, fileSize, bytes,
   }
 };
 
-const computeFileHash = async (item, onProgress) => {
+const computeFileHash = async (item, onProgress, options = {}) => {
   if (item.sha256_hash) {
     return item.sha256_hash;
   }
@@ -203,6 +220,8 @@ const computeFileHash = async (item, onProgress) => {
   let position = 0;
 
   while (position < fileSize) {
+    await throwIfStopped(options);
+
     const length = Math.min(DEFAULT_CHUNK_SIZE, fileSize - position);
     const bytes = await readBytes(item.local_uri, position, length);
     hash.update(bytes);
@@ -246,7 +265,9 @@ export const backupService = {
   },
 
   syncQueueItem: async (item, token, options = {}) => {
+    await throwIfStopped(options);
     await backupService.checkHealth(token);
+    await throwIfStopped(options);
 
     let current = item;
     const emitProgress = (progress) => options.onProgress?.({ item: current, ...progress });
@@ -261,8 +282,12 @@ export const backupService = {
         error: "",
       });
 
-      const sha256Hash = await computeFileHash(current, emitProgress);
+      await throwIfStopped(options);
+
+      const sha256Hash = await computeFileHash(current, emitProgress, options);
       current = await backupQueueStore.update(current.id, { sha256_hash: sha256Hash });
+
+      await throwIfStopped(options);
 
       if (sha256Hash) {
         try {
@@ -283,6 +308,8 @@ export const backupService = {
           // A miss here just means the backend does not already have the file.
         }
       }
+
+      await throwIfStopped(options);
 
       let uploadId = current.upload_id;
       let bytesReceived = Number(current.bytes_received || 0);
@@ -310,16 +337,14 @@ export const backupService = {
       const fileSize = Number(current.file_size || 0);
 
       while (bytesReceived < fileSize) {
-        if (options.signal?.aborted) {
-          const abortError = new Error("Backup cancelled");
-          abortError.name = "AbortError";
-          throw abortError;
-        }
+        await throwIfStopped(options);
 
         const length = Math.min(DEFAULT_CHUNK_SIZE, fileSize - bytesReceived);
         const start = bytesReceived;
         const end = start + length - 1;
         const bytes = await readBytes(current.local_uri, start, length);
+
+        await throwIfStopped(options);
 
         const uploadResponse = await uploadChunk({
           uploadId,
@@ -342,6 +367,8 @@ export const backupService = {
         });
       }
 
+      await throwIfStopped(options);
+
       const completeResponse = await apiRequest(ENDPOINTS.backup.complete(uploadId), {
         method: "POST",
         token,
@@ -359,7 +386,11 @@ export const backupService = {
         completed_at: new Date().toISOString(),
       });
     } catch (error) {
-      if (error?.name === "AbortError") {
+      if (error?.name === "AbortError" || error?.name === "SyncStoppedError" || error?.message === STOPPED_REASON) {
+        await backupQueueStore.update(current.id, {
+          status: BACKUP_QUEUE_STATUS.PENDING,
+          error: "",
+        });
         throw error;
       }
 
@@ -379,15 +410,25 @@ export const backupService = {
     const completed = [];
 
     let hasFailures = false;
+
     for (const item of activeItems) {
+      if (!(await shouldContinueSync(options))) {
+        break;
+      }
+
       try {
         const latest = await backupQueueStore.getById(item.id);
         if (!latest || latest.status === BACKUP_QUEUE_STATUS.COMPLETE) {
           continue;
         }
+
         const result = await backupService.syncQueueItem(latest, token, options);
         completed.push(result);
       } catch (error) {
+        if (error?.name === "SyncStoppedError" || error?.message === STOPPED_REASON) {
+          break;
+        }
+
         console.error(`[Backup] Failed to sync item ${item.id}:`, error);
         hasFailures = true;
       }
@@ -396,6 +437,8 @@ export const backupService = {
     await backupQueueMetaStore.merge({
       last_resume_at: new Date().toISOString(),
       last_resume_count: completed.length,
+      last_resume_stopped: !(await shouldContinueSync(options)),
+      last_resume_had_failures: hasFailures,
     });
 
     return completed;

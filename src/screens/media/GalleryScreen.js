@@ -41,7 +41,7 @@ import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { borderRadius, layout, spacing, typography } from "../../theme/designSystem";
 import { moderateScale } from "../../theme/responsive";
-import { getMediaUri } from "../../utils/media";
+import { getMediaSource, getMediaUri } from "../../utils/media";
 import { getOrCreateVideoThumbnailUri } from "../../utils/videoThumbnails";
 
 const GRID_COLUMNS = 3;
@@ -160,6 +160,7 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
     selectedChild,
     canManageMedia,
     isChildAccount,
+    authToken,
     loadChildMedia,
     moveMediaToRecycleBin,
   } = useProfile();
@@ -213,9 +214,9 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
   }, [isChildAccount, mediaItems, sceneReady, selectedChildId]);
 
   const filteredMediaItems = useMemo(() => {
-    console.time("[Perf] Gallery filteredMediaItems");
     const result = scopedMediaItems
       .filter((item) => {
+        if (!item) return false;
         const itemDate = getItemDate(item);
         const isAfterStart = startDate ? itemDate >= getStartOfDay(startDate) : true;
         const isBeforeEnd = endDate ? itemDate <= getEndOfDay(endDate) : true;
@@ -225,22 +226,19 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
         if (mediaType === "all") return true;
         return getNormalizedCategory(item) === mediaType;
       })
-      .filter((item) =>
-        (item.original_file_name || item.stored_file_name || "")
-          .toLowerCase()
-          .includes(searchQuery.toLowerCase())
-      )
+      .filter((item) => {
+        const name = item?.original_file_name || item?.stored_file_name || "";
+        return name.toLowerCase().includes(searchQuery.toLowerCase());
+      })
       .sort((firstItem, secondItem) =>
         isDateReversed
           ? getItemDate(firstItem) - getItemDate(secondItem)
           : getItemDate(secondItem) - getItemDate(firstItem)
       );
-    console.timeEnd("[Perf] Gallery filteredMediaItems");
     return result;
   }, [endDate, mediaType, scopedMediaItems, searchQuery, startDate, isDateReversed]);
 
   const groupedMedia = useMemo(() => {
-    console.time("[Perf] Gallery groupedMedia");
     const groups = {};
 
     filteredMediaItems.forEach((item) => {
@@ -274,7 +272,6 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
         ? firstGroup.date - secondGroup.date
         : secondGroup.date - firstGroup.date
     );
-    console.timeEnd("[Perf] Gallery groupedMedia");
     return result;
   }, [filteredMediaItems, isDateReversed]);
 
@@ -313,6 +310,11 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
     return { refMap, identityMap };
   }, [imageItems]);
 
+  const getAuthenticatedMediaSource = useCallback(
+    (item) => getMediaSource(item, authToken),
+    [authToken]
+  );
+
   const mediaTileSize = useMemo(
     () =>
       (windowWidth -
@@ -323,7 +325,6 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
   );
 
   const galleryListItems = useMemo(() => {
-    console.time("[Perf] Gallery galleryListItems");
     const items = [];
 
     groupedMedia.forEach((group) => {
@@ -352,10 +353,59 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
       }
     });
 
-    const result = items;
-    console.timeEnd("[Perf] Gallery galleryListItems");
-    return result;
+    return items;
   }, [groupedMedia, imageItemIndexMap]);
+
+  const openViewer = useCallback(
+    (item, selectedIndex) => {
+      let index = selectedIndex;
+
+      if (index === undefined || index === null || index < 0) {
+        index = imageItemIndexMap.refMap.get(item);
+      }
+
+      if (index === undefined || index === null || index < 0) {
+        const itemKey = getMediaItemIdentity(item);
+        index = imageItemIndexMap.identityMap.get(itemKey);
+      }
+
+      if (index === undefined || index === null || index < 0) {
+        const targetUri = getMediaUri(item);
+        index = imageItems.findIndex((currentItem) => {
+          if (currentItem === item) {
+            return true;
+          }
+
+          try {
+            if (targetUri && getMediaUri(currentItem) === targetUri) {
+              return true;
+            }
+          } catch (e) {
+            // ignore
+          }
+
+          const currentId = getMediaItemId(currentItem);
+          const itemId = getMediaItemId(item);
+          return currentId && itemId && String(currentId) === String(itemId);
+        });
+      }
+
+      setViewerIndex(index >= 0 ? index : 0);
+      setViewerVisible(true);
+    },
+    [imageItems, imageItemIndexMap]
+  );
+
+  const openVideoViewer = useCallback((item) => {
+    const videos = filteredMediaItems.filter(i => getNormalizedCategory(i) === "videos");
+    const itemId = getMediaItemId(item);
+    console.log("VIDEO ITEM:", item);
+    const index = videos.findIndex(v => getMediaItemId(v) === itemId);
+    navigation.navigate("FullScreenVideo", {
+      mediaItems: videos,
+      initialIndex: index >= 0 ? index : 0,
+    });
+  }, [filteredMediaItems, navigation]);
 
   const handleMediaPress = useCallback(
     (item, selectedIndex) => {
@@ -436,7 +486,7 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
                 ) : (
                   <View style={styles.mediaTileContent}>
                     {category === "images" && (
-                      <CachedImage source={{ uri: getMediaUri(mediaItem) }} style={styles.mediaPreview} />
+                      <CachedImage source={getAuthenticatedMediaSource(mediaItem)} style={styles.mediaPreview} />
                     )}
                     {category === "videos" && (
                       <VideoThumbnail item={mediaItem} style={styles.mediaPreview} small showDuration />
@@ -452,7 +502,7 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
         </View>
       );
     },
-    [handleMediaPress, mediaTileSize, theme]
+    [getAuthenticatedMediaSource, handleMediaPress, mediaTileSize, theme]
   );
 
   const getGalleryListKey = useCallback((item) => item.key, []);
@@ -493,57 +543,6 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
       };
     }, [isChildAccount, loadChildMedia, selectedChildId])
   );
-
-  const openViewer = useCallback(
-    (item, selectedIndex) => {
-      let index = selectedIndex;
-
-      if (index === undefined || index === null || index < 0) {
-        index = imageItemIndexMap.refMap.get(item);
-      }
-
-      if (index === undefined || index === null || index < 0) {
-        const itemKey = getMediaItemIdentity(item);
-        index = imageItemIndexMap.identityMap.get(itemKey);
-      }
-
-      if (index === undefined || index === null || index < 0) {
-        const targetUri = getMediaUri(item);
-        index = imageItems.findIndex((currentItem) => {
-          if (currentItem === item) {
-            return true;
-          }
-
-          try {
-            if (targetUri && getMediaUri(currentItem) === targetUri) {
-              return true;
-            }
-          } catch (e) {
-            // ignore
-          }
-
-          const currentId = getMediaItemId(currentItem);
-          const itemId = getMediaItemId(item);
-          return currentId && itemId && String(currentId) === String(itemId);
-        });
-      }
-
-      setViewerIndex(index >= 0 ? index : 0);
-      setViewerVisible(true);
-    },
-    [imageItems, imageItemIndexMap]
-  );
-
-  const openVideoViewer = useCallback((item) => {
-    const videos = filteredMediaItems.filter(i => getNormalizedCategory(i) === "videos");
-    const itemId = getMediaItemId(item);
-    console.log("VIDEO ITEM:", item);
-    const index = videos.findIndex(v => getMediaItemId(v) === itemId);
-    navigation.navigate("FullScreenVideo", {
-      mediaItems: videos,
-      initialIndex: index >= 0 ? index : 0,
-    });
-  }, [filteredMediaItems, navigation]);
 
   const handleDateChange = (_, selectedDate) => {
     if (Platform.OS === "android") {
@@ -651,6 +650,7 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
                   renderItem={({ item }) => (
                     <ImageTile
                       uri={getMediaUri(item)}
+                      source={getAuthenticatedMediaSource(item)}
                       style={styles.highlightCard}
                       onPress={() => openViewer(item, imageItemIndexMap.identityMap.get(getMediaItemIdentity(item)))}
                       title={getFriendlyTitle(item, "Garden Play")}
@@ -705,6 +705,7 @@ export default function GalleryScreen({ navigation, onOpenMenu }) {
         onClose={() => setViewerVisible(false)}
         onDelete={canManageMedia ? moveMediaToRecycleBin : null}
         getImageUri={getMediaUri}
+        getImageSource={getAuthenticatedMediaSource}
         getImageTitle={(item) => item?.original_file_name || item?.stored_file_name || "Image"}
       />
 

@@ -14,6 +14,7 @@ import ThemedAvatar from "../../components/common/ThemedAvatar";
 import { useAuth } from "../../hooks/useAuth";
 import { useProfile } from "../../context/ProfileContext";
 import { backupAutoSyncService } from "../../services/backupAutoSyncService";
+import { backupBackgroundTask } from "../../services/backupBackgroundTask";
 import { backupService } from "../../services/backupService";
 import { borderRadius, layout, spacing, typography } from "../../theme/designSystem";
 import { moderateScale } from "../../theme/responsive";
@@ -53,22 +54,29 @@ const formatLastBackup = (value) => {
 };
 
 export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
-  const { currentUser, parentDevices } = useAuth();
+  const { authToken, currentUser, parentDevices } = useAuth();
   const { viewerProfile } = useProfile();
+
   const [settings, setSettings] = useState(null);
   const [snapshot, setSnapshot] = useState({ items: [], meta: {}, storageType: "pending" });
   const [isScanning, setIsScanning] = useState(false);
+  const [isTogglingSync, setIsTogglingSync] = useState(false);
   const [scanMessage, setScanMessage] = useState("");
+
+  const isAutoSyncEnabled = Boolean(settings?.enabled);
   const mediaTypes = settings?.mediaTypes || [];
   const photos = mediaTypes.includes("photo");
   const videos = mediaTypes.includes("video");
   const files = mediaTypes.includes("file");
+
   const deviceId =
     currentUser?.device_id ||
     currentUser?.deviceId ||
     currentUser?.device?.id ||
     parentDevices?.[0]?.id ||
     null;
+
+  const childId = currentUser?.child_id || currentUser?.childId || currentUser?.child?.id;
 
   const backupStats = useMemo(() => {
     const items = snapshot.items || [];
@@ -200,8 +208,39 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
   };
 
   const toggleAutoSync = async (enabled) => {
-    const nextSettings = await backupAutoSyncService.updateSettings({ enabled });
-    setSettings(nextSettings);
+    if (isTogglingSync) {
+      return;
+    }
+
+    setIsTogglingSync(true);
+    setScanMessage("");
+    setSettings((current) => ({
+      ...(current || {}),
+      enabled,
+    }));
+
+    try {
+      if (!enabled) {
+        setIsScanning(false);
+        await backupAutoSyncService.stopNow();
+        await backupBackgroundTask.saveContext(null).catch(() => {});
+        await backupBackgroundTask.unregister?.().catch(() => {});
+        setScanMessage("Auto sync stopped.");
+        await loadState();
+        return;
+      }
+
+      const nextSettings = await backupAutoSyncService.startNow();
+      setSettings(nextSettings);
+      setScanMessage("Auto sync enabled.");
+      await loadState();
+    } catch (error) {
+      setScanMessage(`Error: ${error?.message || "Unable to update auto sync."}`);
+      await loadState().catch(() => {});
+    } finally {
+      setIsTogglingSync(false);
+      setTimeout(() => setScanMessage(""), 5000);
+    }
   };
 
   const scanNow = async () => {
@@ -209,53 +248,87 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
       return;
     }
 
+    if (!isAutoSyncEnabled) {
+      setScanMessage("Auto sync is off. Turn it on to scan and upload media.");
+      setTimeout(() => setScanMessage(""), 5000);
+      return;
+    }
+
+    if (!authToken) {
+      setScanMessage("Please login again before starting backup.");
+      setTimeout(() => setScanMessage(""), 5000);
+      return;
+    }
+
     setScanMessage("");
     setIsScanning(true);
 
     try {
-      // First check permission status
       const permStatus = await backupAutoSyncService.getPermissionStatus();
-      
+
       if (!permStatus.granted) {
-        // Request permission
         const reqResult = await backupAutoSyncService.requestPermission();
-        
+
         if (!reqResult.granted) {
           setScanMessage(
             reqResult.permanent
-              ? "❌ Permission permanently denied. Enable in Settings > Apps > Family Media Hub > Permissions > Photos"
-              : "❌ Permission denied. Please allow access to photos and videos."
+              ? "Permission permanently denied. Enable in Settings > Apps > Family Media Hub > Permissions > Photos"
+              : "Permission denied. Please allow access to photos and videos."
           );
           setIsScanning(false);
           return;
         }
       }
 
-      // Now scan
+      setScanMessage("Scanning media...");
+
       const scanResult = await backupAutoSyncService.scanMediaNow({
         deviceId,
-        childId: currentUser?.child_id || currentUser?.childId || currentUser?.child?.id,
+        childId,
         settings,
       });
 
       if (scanResult.error) {
-        setScanMessage(`❌ Scan failed: ${scanResult.error}`);
-      } else if (scanResult.skippedReason) {
-        setScanMessage(`⚠️ ${scanResult.skippedReason}`);
-      } else {
-        const queuedMsg = scanResult.queued?.length 
-          ? ` - ${scanResult.queued.length} new items queued`
-          : "";
-        setScanMessage(`✅ Scan complete: Found ${scanResult.scanned} items${queuedMsg}`);
+        setScanMessage(`Scan failed: ${scanResult.error}`);
+        await loadState();
+        return;
       }
 
-      // Reload state
+      if (scanResult.skippedReason) {
+        setScanMessage(scanResult.skippedReason);
+        await loadState();
+        return;
+      }
+
+      const queuedCount = Number(scanResult.queued?.length || 0);
+      setScanMessage(`Scan complete: Found ${scanResult.scanned} items. Uploading backup...`);
+      await loadState();
+
+      const completed = await backupService.resumeQueue(authToken, {
+        shouldContinue: async () => backupAutoSyncService.isEnabled(),
+        onProgress: async (progress) => {
+          setScanMessage(
+            progress?.item?.file_name
+              ? `Uploading ${progress.item.file_name}...`
+              : "Uploading backup..."
+          );
+          await loadState().catch(() => {});
+        },
+      });
+
+      const completedCount = Number(completed?.length || 0);
+
+      setScanMessage(
+        completedCount > 0
+          ? `Backup complete: ${completedCount} files uploaded.${queuedCount ? ` ${queuedCount} new items queued.` : ""}`
+          : `Scan complete: ${scanResult.scanned} items found. Upload will continue automatically.`
+      );
+
       await loadState();
     } catch (error) {
-      setScanMessage(`❌ Error: ${error?.message || "Unknown error"}`);
+      setScanMessage(`Error: ${error?.message || "Unknown error"}`);
     } finally {
       setIsScanning(false);
-      // Clear message after 5 seconds
       setTimeout(() => setScanMessage(""), 5000);
     }
   };
@@ -266,22 +339,30 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
       Alert.alert("No files skipped", "The last scan didn't skip any files.");
       return;
     }
-    Alert.alert("Skipped Files", `The following ${list.length} files were skipped (0 bytes):\n\n${list.slice(0, 10).join('\n')}${list.length > 10 ? '\n...and more' : ''}`);
+
+    Alert.alert(
+      "Skipped Files",
+      `The following ${list.length} files were skipped (0 bytes):\n\n${list
+        .slice(0, 10)
+        .join("\n")}${list.length > 10 ? "\n...and more" : ""}`
+    );
   };
 
-  const autoSyncRunning = Boolean(snapshot.meta?.last_autosync_running);
-  const statusTitle = snapshot.meta?.last_autosync_error
-    ? "Backup needs attention"
-    : autoSyncRunning
-    ? `Auto sync ${String(snapshot.meta?.last_autosync_phase || "running").replace(/_/g, " ")}`
-    : settings?.enabled
-    ? "Auto sync is on"
-    : "Auto sync is off";
-  const statusDetail = snapshot.meta?.last_autosync_error
-    ? snapshot.meta.last_autosync_error
-    : autoSyncRunning && snapshot.meta?.last_autosync_current_file
-    ? snapshot.meta.last_autosync_current_file
-    : `Last backup: ${formatLastBackup(snapshot.meta?.last_autosync_at)}`;
+  const autoSyncRunning = isAutoSyncEnabled && Boolean(snapshot.meta?.last_autosync_running);
+  const statusTitle = !isAutoSyncEnabled
+    ? "Auto sync is off"
+    : snapshot.meta?.last_autosync_error
+      ? "Backup needs attention"
+      : autoSyncRunning
+        ? `Auto sync ${String(snapshot.meta?.last_autosync_phase || "running").replace(/_/g, " ")}`
+        : "Auto sync is on";
+  const statusDetail = !isAutoSyncEnabled
+    ? "Sync is stopped. Turn on Auto sync to resume."
+    : snapshot.meta?.last_autosync_error
+      ? snapshot.meta.last_autosync_error
+      : autoSyncRunning && snapshot.meta?.last_autosync_current_file
+        ? snapshot.meta.last_autosync_current_file
+        : `Last backup: ${formatLastBackup(snapshot.meta?.last_autosync_at)}`;
 
   return (
     <View style={styles.container}>
@@ -316,17 +397,18 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
 
         <View style={styles.introCard}>
           <View style={styles.shieldIcon}>
-            <Ionicons name="shield" size={18} color="#FFFFFF" />
+            <Ionicons name={isAutoSyncEnabled ? "shield" : "pause"} size={18} color="#FFFFFF" />
           </View>
           <View style={styles.flex}>
-            <Text style={styles.cardTitle}>{settings?.enabled ? "Auto sync enabled" : "Auto sync disabled"}</Text>
+            <Text style={styles.cardTitle}>{isAutoSyncEnabled ? "Auto sync enabled" : "Auto sync disabled"}</Text>
             <Text style={styles.cardSub}>
               Storage: {snapshot.storageType} - {snapshot.meta?.last_autosync_scan_count || 0} scanned
             </Text>
           </View>
           <Switch
-            value={Boolean(settings?.enabled)}
+            value={isAutoSyncEnabled}
             onValueChange={toggleAutoSync}
+            disabled={isTogglingSync}
             trackColor={{ false: "#E5E7EB", true: "#5B3FFF" }}
             thumbColor="#FFFFFF"
           />
@@ -339,12 +421,16 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
           </View>
           <View style={styles.signalWrap}>
             <View style={styles.dottedLine} />
-            <Ionicons name="wifi" size={18} color="#5B3FFF" />
+            <Ionicons name={isAutoSyncEnabled ? "wifi" : "pause-circle"} size={18} color="#5B3FFF" />
             <View style={styles.dottedLine} />
           </View>
           <View style={styles.driveMock}>
             <View style={styles.checkBubble}>
-              <Ionicons name={autoSyncRunning ? "sync" : "checkmark"} size={16} color="#FFFFFF" />
+              <Ionicons
+                name={autoSyncRunning ? "sync" : isAutoSyncEnabled ? "checkmark" : "pause"}
+                size={16}
+                color="#FFFFFF"
+              />
             </View>
             <Ionicons name="home-outline" size={16} color="#64748B" />
           </View>
@@ -378,9 +464,9 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
         <View style={styles.statusCard}>
           <View style={styles.statusLeft}>
             <Ionicons
-              name={snapshot.meta?.last_autosync_error ? "alert-circle" : "checkmark-circle"}
+              name={!isAutoSyncEnabled ? "pause-circle" : snapshot.meta?.last_autosync_error ? "alert-circle" : "checkmark-circle"}
               size={22}
-              color={snapshot.meta?.last_autosync_error ? "#EF4444" : "#22C55E"}
+              color={!isAutoSyncEnabled ? "#6B7280" : snapshot.meta?.last_autosync_error ? "#EF4444" : "#22C55E"}
             />
             <View style={styles.flex}>
               <Text style={styles.statusTitle}>{statusTitle}</Text>
@@ -391,8 +477,8 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
           </View>
 
           <View style={styles.autoBadge}>
-            <Ionicons name="sync" size={13} color="#5B3FFF" />
-            <Text style={styles.autoBadgeText}>Auto</Text>
+            <Ionicons name={isAutoSyncEnabled ? "sync" : "pause"} size={13} color="#5B3FFF" />
+            <Text style={styles.autoBadgeText}>{isAutoSyncEnabled ? "Auto" : "Off"}</Text>
           </View>
         </View>
 
@@ -406,12 +492,14 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
         )}
 
         <TouchableOpacity
-          style={[styles.scanNowButton, isScanning && styles.scanNowButtonDisabled]}
+          style={[styles.scanNowButton, (isScanning || !isAutoSyncEnabled) && styles.scanNowButtonDisabled]}
           onPress={scanNow}
-          disabled={isScanning || !deviceId}
+          disabled={isScanning || !deviceId || !isAutoSyncEnabled}
         >
           <Ionicons name={isScanning ? "sync" : "search"} size={16} color="#FFFFFF" />
-          <Text style={styles.scanNowButtonText}>{isScanning ? "Scanning..." : "Scan Now"}</Text>
+          <Text style={styles.scanNowButtonText}>
+            {isScanning ? "Scanning / Uploading..." : isAutoSyncEnabled ? "Scan Now" : "Auto Sync Off"}
+          </Text>
         </TouchableOpacity>
 
         {scanMessage ? (
@@ -444,18 +532,9 @@ export default function BackupSettingsScreen({ navigation, onOpenMenu }) {
           <Text style={styles.footerText}>All selected items are saved in Media on your LAN backup server.</Text>
         </View>
       </ScrollView>
-
     </View>
   );
 }
-
-const serverIconName = (running, hasError) => {
-  if (hasError) {
-    return "cloud-offline-outline";
-  }
-
-  return running ? "sync" : "wifi-outline";
-};
 
 const MediaToggle = ({ icon, title, stats, value, onValueChange }) => (
   <View style={styles.mediaCard}>
@@ -480,10 +559,6 @@ const MediaToggle = ({ icon, title, stats, value, onValueChange }) => (
 );
 
 const styles = StyleSheet.create({
-  darkContainer: {
-    flex: 1,
-    backgroundColor: "#FBFAFF",
-  },
   container: {
     flex: 1,
     backgroundColor: "#FFFFFF",
@@ -491,232 +566,6 @@ const styles = StyleSheet.create({
   content: {
     paddingTop: spacing.xxl,
     paddingBottom: spacing.xxl,
-  },
-  darkHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    paddingHorizontal: layout.screenPadding,
-    marginBottom: spacing.xxl,
-  },
-  darkHeaderButton: {
-    width: moderateScale(64),
-    height: moderateScale(64),
-    borderRadius: borderRadius.lg,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#ECE9F7",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  darkHeaderTitle: {
-    color: "#101445",
-    fontSize: typography.heading,
-    fontWeight: "900",
-  },
-  darkToggleCard: {
-    minHeight: moderateScale(56),
-    marginHorizontal: layout.screenPadding,
-    marginBottom: spacing.lg,
-    paddingHorizontal: spacing.lg,
-    borderRadius: borderRadius.md,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#ECE9F7",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  darkToggleTitle: {
-    color: "#101445",
-    fontSize: typography.title,
-    fontWeight: "500",
-  },
-  darkBackupPanel: {
-    marginHorizontal: layout.screenPadding,
-    marginBottom: spacing.xxl,
-    paddingTop: spacing.xxl,
-    paddingHorizontal: spacing.lg,
-    paddingBottom: spacing.lg,
-    borderRadius: borderRadius.md,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#ECE9F7",
-  },
-  connectionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: moderateScale(16),
-  },
-  connectionLine: {
-    width: moderateScale(84),
-    borderTopWidth: moderateScale(3),
-    borderStyle: "dotted",
-    borderColor: "#7377A0",
-  },
-  connectionText: {
-    marginTop: spacing.xs,
-    color: "#7377A0",
-    fontSize: typography.body,
-    fontWeight: "500",
-    textAlign: "center",
-  },
-  darkMediaRow: {
-    marginTop: spacing.xl,
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  darkMediaCard: {
-    flex: 1,
-    minHeight: moderateScale(178),
-    borderRadius: borderRadius.sm,
-    borderWidth: 1,
-    borderColor: "#ECE9F7",
-    padding: spacing.lg,
-    backgroundColor: "#FFFFFF",
-  },
-  darkMediaCardActive: {
-    borderColor: "#5B3FFF",
-  },
-  darkMediaCardTop: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-  },
-  darkCheckBox: {
-    width: moderateScale(30),
-    height: moderateScale(30),
-    borderRadius: moderateScale(4),
-    backgroundColor: "#F1ECFF",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  darkCheckBoxActive: {
-    backgroundColor: "#5B3FFF",
-  },
-  darkMediaTitle: {
-    marginTop: spacing.xl,
-    color: "#101445",
-    fontSize: typography.heading,
-    fontWeight: "900",
-  },
-  darkMediaCount: {
-    marginTop: spacing.md,
-    color: "#7377A0",
-    fontSize: typography.body,
-    fontWeight: "500",
-  },
-  darkMediaBytes: {
-    marginTop: spacing.sm,
-    color: "#7377A0",
-    fontSize: typography.body,
-    fontWeight: "500",
-  },
-  darkHelpText: {
-    marginTop: spacing.xl,
-    color: "#7377A0",
-    fontSize: typography.body,
-    lineHeight: typography.body * 1.4,
-    fontWeight: "500",
-  },
-  darkSectionTitle: {
-    paddingHorizontal: layout.screenPadding,
-    color: "#101445",
-    fontSize: typography.title,
-    fontWeight: "900",
-  },
-  darkDestinationCard: {
-    minHeight: moderateScale(56),
-    marginHorizontal: layout.screenPadding,
-    marginTop: spacing.sm,
-    paddingHorizontal: spacing.lg,
-    borderRadius: borderRadius.md,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#ECE9F7",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  darkDestinationTitle: {
-    color: "#101445",
-    fontSize: typography.title,
-    fontWeight: "500",
-  },
-  darkDestinationSub: {
-    marginTop: spacing.sm,
-    marginHorizontal: spacing.xl,
-    color: "#7377A0",
-    fontSize: typography.body,
-    lineHeight: typography.body * 1.4,
-    fontWeight: "500",
-  },
-  fileRowDark: {
-    marginHorizontal: layout.screenPadding,
-    marginTop: spacing.lg,
-    minHeight: moderateScale(52),
-    paddingHorizontal: spacing.md,
-    borderRadius: borderRadius.md,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#ECE9F7",
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-  },
-  fileRowLeft: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-  },
-  fileRowText: {
-    color: "#101445",
-    fontSize: 15,
-    fontWeight: "800",
-  },
-  fileRowMeta: {
-    color: "#7377A0",
-    fontSize: 13,
-    fontWeight: "700",
-  },
-  darkStatusCard: {
-    marginHorizontal: layout.screenPadding,
-    marginTop: spacing.lg,
-    padding: spacing.lg,
-    borderRadius: borderRadius.md,
-    backgroundColor: "#FFFFFF",
-    borderWidth: 1,
-    borderColor: "#ECE9F7",
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.sm,
-  },
-  darkStatusTitle: {
-    color: "#101445",
-    fontSize: typography.caption,
-    fontWeight: "900",
-  },
-  darkStatusSub: {
-    marginTop: spacing.xs,
-    color: "#7377A0",
-    fontSize: typography.caption,
-    fontWeight: "600",
-  },
-  darkScanMessageBox: {
-    marginHorizontal: layout.screenPadding,
-    marginTop: spacing.sm,
-    padding: spacing.md,
-    borderRadius: borderRadius.md,
-    backgroundColor: "#052E16",
-    borderWidth: 1,
-    borderColor: "#14532D",
-  },
-  darkScanMessageText: {
-    color: "#DCFCE7",
-    fontSize: typography.caption,
-    fontWeight: "600",
-    lineHeight: typography.caption * 1.4,
   },
   header: {
     flexDirection: "row",
@@ -1004,9 +853,6 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
     fontSize: typography.body,
     fontWeight: "700",
-  },
-  spinIcon: {
-    animationIterationCount: "infinite",
   },
   scanMessageBox: {
     marginHorizontal: layout.screenPadding,

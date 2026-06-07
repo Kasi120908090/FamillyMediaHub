@@ -8,6 +8,7 @@ import { ensureMediaLibraryPermissions } from "../utils/permissionHelper";
 const SETTINGS_KEY = "@family-media-hub/backup-autosync-settings";
 const DEFAULT_SCAN_LIMIT = 250;
 const HEALTH_TIMEOUT_MS = 3000;
+const STOPPED_REASON = "auto sync is disabled";
 
 export const DEFAULT_AUTO_SYNC_SETTINGS = {
   enabled: true,
@@ -17,6 +18,7 @@ export const DEFAULT_AUTO_SYNC_SETTINGS = {
 };
 
 let isRunning = false;
+let stopRequested = false;
 
 const stringToBytes = (value) => {
   const input = String(value || "");
@@ -77,9 +79,26 @@ const getFileSize = async (uri, fallbackSize = 0) => {
   }
 };
 
+const mergeSettings = (settings) => ({
+  ...DEFAULT_AUTO_SYNC_SETTINGS,
+  ...(settings || {}),
+});
+
+const isAutoSyncEnabled = async (settings) => {
+  const resolvedSettings = mergeSettings(settings || (await backupAutoSyncService.getSettings()));
+  return Boolean(resolvedSettings.enabled) && !stopRequested;
+};
+
+const getStopResult = () => ({
+  queued: [],
+  scanned: 0,
+  skipped: true,
+  skippedReason: STOPPED_REASON,
+});
+
 const getMediaPermission = async () => {
   const result = await ensureMediaLibraryPermissions();
-  
+
   if (result.granted) {
     return true;
   }
@@ -157,6 +176,13 @@ const getDeviceMediaCounts = async () => {
 };
 
 const scanMediaAssets = async (settings) => {
+  if (!(await isAutoSyncEnabled(settings))) {
+    return {
+      assets: [],
+      skippedReason: STOPPED_REASON,
+    };
+  }
+
   if (!MediaLibrary?.getAssetsAsync) {
     return {
       assets: [],
@@ -177,13 +203,11 @@ const scanMediaAssets = async (settings) => {
     .map(normalizeMediaType)
     .filter(Boolean);
   const deviceCounts = await getDeviceMediaCounts();
-  
-  // Diagnostic logging
+
   console.log("[BackupScan] Selected media types:", selectedMediaTypes);
   console.log("[BackupScan] MediaLibrary.MediaType:", MediaLibrary.MediaType);
-  
-  // Map to correct MediaLibrary enum values
-  let mediaTypeFilters = [];
+
+  const mediaTypeFilters = [];
   if (selectedMediaTypes.includes("photo") && getMediaLibraryTypeValue("photo")) {
     mediaTypeFilters.push(getMediaLibraryTypeValue("photo"));
   }
@@ -194,28 +218,32 @@ const scanMediaAssets = async (settings) => {
     mediaTypeFilters.push(getMediaLibraryTypeValue("audio"));
   }
 
-  // If no valid media types found, fall back to just scanning with no filter
   const mediaType = mediaTypeFilters.length > 0 ? mediaTypeFilters : undefined;
-  
+
   console.log("[BackupScan] Media type filters:", mediaTypeFilters);
-  
+
   const limit = Math.max(1, Number(settings.scanLimit || DEFAULT_SCAN_LIMIT));
   const discovered = [];
   let after = null;
 
   while (discovered.length < limit) {
+    if (!(await isAutoSyncEnabled(settings))) {
+      return {
+        assets: [],
+        skippedReason: STOPPED_REASON,
+      };
+    }
+
     try {
       const queryOptions = {
         first: Math.min(100, limit - discovered.length),
         after,
       };
-      
-      // Only add mediaType filter if we have valid types
+
       if (mediaType) {
         queryOptions.mediaType = mediaType;
       }
-      
-      // Add sort if available
+
       if (MediaLibrary.SortBy?.modificationTime) {
         queryOptions.sortBy = [MediaLibrary.SortBy.modificationTime];
       }
@@ -223,7 +251,7 @@ const scanMediaAssets = async (settings) => {
       console.log("[BackupScan] Query options:", queryOptions);
 
       const response = await MediaLibrary.getAssetsAsync(queryOptions);
-      
+
       console.log("[BackupScan] Response batch - found", response?.assets?.length || 0, "assets");
 
       const pageAssets = Array.isArray(response?.assets) ? response.assets : [];
@@ -239,7 +267,6 @@ const scanMediaAssets = async (settings) => {
       after = response.endCursor;
     } catch (error) {
       console.warn("[BackupScan] Error during scan:", error?.message);
-      // Log error but continue - some assets might be unreadable
       break;
     }
   }
@@ -250,25 +277,26 @@ const scanMediaAssets = async (settings) => {
   const skipped = [];
 
   for (const asset of discovered) {
+    if (!(await isAutoSyncEnabled(settings))) {
+      return {
+        assets: [],
+        skippedReason: STOPPED_REASON,
+      };
+    }
+
     try {
-      // Try to get detailed info (requires ACCESS_MEDIA_LOCATION for EXIF)
       let info = asset;
       try {
         if (MediaLibrary.getAssetInfoAsync) {
           info = await MediaLibrary.getAssetInfoAsync(asset);
         }
       } catch (infoError) {
-        // Fall back to basic asset info if getAssetInfoAsync fails
-        // (e.g., missing ACCESS_MEDIA_LOCATION permission)
         console.warn("[BackupScan] Could not get detailed info, using basic asset info:", infoError?.message);
       }
 
       const uri = info?.localUri || info?.uri || asset.uri;
-      
-      // For photos, fileSize might be unavailable - use a default minimum
-      // Videos usually have size, but photos might not
-      let fileSize = await getFileSize(uri, info?.fileSize || asset.fileSize || 0);
-      
+      const fileSize = await getFileSize(uri, info?.fileSize || asset.fileSize || 0);
+
       if (fileSize < 1) {
         console.warn("[BackupScan] Skipping asset - size is 0 or unreadable:", asset.filename);
         skipped.push(asset.filename || asset.id);
@@ -280,11 +308,11 @@ const scanMediaAssets = async (settings) => {
         continue;
       }
 
-      console.log("[BackupScan] Added asset:", { 
-        name: asset.filename, 
-        size: fileSize, 
+      console.log("[BackupScan] Added asset:", {
+        name: asset.filename,
+        size: fileSize,
         mediaType: asset.mediaType,
-        uri: uri.substring(0, 50) 
+        uri: uri.substring(0, 50),
       });
 
       assets.push({
@@ -298,18 +326,12 @@ const scanMediaAssets = async (settings) => {
       });
     } catch (error) {
       console.warn("[BackupScan] Error processing asset:", error?.message);
-      // Keep scanning even if one asset cannot be resolved to a readable file URI.
     }
   }
 
   console.log("[BackupScan] Final assets after filtering:", assets.length);
   return { assets, discoveredCount: discovered.length, skipped, deviceCounts };
 };
-
-const mergeSettings = (settings) => ({
-  ...DEFAULT_AUTO_SYNC_SETTINGS,
-  ...(settings || {}),
-});
 
 const withTimeoutSignal = (timeoutMs) => {
   if (typeof AbortController === "undefined") {
@@ -367,11 +389,69 @@ export const backupAutoSyncService = {
       ...(await backupAutoSyncService.getSettings()),
       ...updates,
     });
+
+    if (updates?.enabled === false) {
+      stopRequested = true;
+      isRunning = false;
+      await backupQueueMetaStore.merge({
+        last_autosync_running: false,
+        last_autosync_phase: "stopped",
+        last_autosync_error: "",
+      });
+    }
+
+    if (updates?.enabled === true) {
+      stopRequested = false;
+      await backupQueueMetaStore.merge({
+        last_autosync_phase: "idle",
+        last_autosync_error: "",
+      });
+    }
+
     await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(nextSettings));
     return nextSettings;
   },
 
+  stopNow: async () => {
+    stopRequested = true;
+    isRunning = false;
+
+    await AsyncStorage.setItem(
+      SETTINGS_KEY,
+      JSON.stringify({
+        ...(await backupAutoSyncService.getSettings()),
+        enabled: false,
+      })
+    );
+
+    await backupQueueMetaStore.merge({
+      last_autosync_running: false,
+      last_autosync_phase: "stopped",
+      last_autosync_error: "",
+      last_autosync_scan_error: "",
+    });
+
+    return { stopped: true, skippedReason: STOPPED_REASON };
+  },
+
+  startNow: async () => {
+    stopRequested = false;
+    const nextSettings = await backupAutoSyncService.updateSettings({ enabled: true });
+    return nextSettings;
+  },
+
   scanAndEnqueue: async ({ deviceId, childId, settings } = {}) => {
+    const resolvedSettings = mergeSettings(settings || (await backupAutoSyncService.getSettings()));
+
+    if (!resolvedSettings.enabled || stopRequested) {
+      await backupQueueMetaStore.merge({
+        last_autosync_scan_error: "",
+        last_autosync_phase: "stopped",
+        last_autosync_running: false,
+      });
+      return getStopResult();
+    }
+
     if (!deviceId) {
       await backupQueueMetaStore.merge({
         last_autosync_scan_error: "no backup device is linked",
@@ -379,13 +459,19 @@ export const backupAutoSyncService = {
       return { queued: [], scanned: 0, skippedReason: "no backup device is linked" };
     }
 
-    const scanResult = await scanMediaAssets(mergeSettings(settings));
+    const scanResult = await scanMediaAssets(resolvedSettings);
 
     if (scanResult.skippedReason) {
       await backupQueueMetaStore.merge({
-        last_autosync_scan_error: scanResult.skippedReason,
+        last_autosync_scan_error: scanResult.skippedReason === STOPPED_REASON ? "" : scanResult.skippedReason,
+        last_autosync_phase: scanResult.skippedReason === STOPPED_REASON ? "stopped" : "idle",
+        last_autosync_running: false,
       });
       return { queued: [], scanned: 0, skippedReason: scanResult.skippedReason };
+    }
+
+    if (!(await isAutoSyncEnabled(resolvedSettings))) {
+      return getStopResult();
     }
 
     await backupQueueStore.init();
@@ -404,11 +490,14 @@ export const backupAutoSyncService = {
     const migrationPromises = [];
 
     for (const asset of scanResult.assets) {
+      if (!(await isAutoSyncEnabled(resolvedSettings))) {
+        return getStopResult();
+      }
+
       const existing = queuedMap.get(asset.id);
       if (!activeQueuedIds.has(asset.id)) {
         newAssets.push(asset);
       } else if (existing && !existing.duration && asset.duration > 0) {
-        // Data Migration: Backfill duration for existing queued items discovered in scan
         migrationPromises.push(backupQueueStore.update(asset.id, { duration: asset.duration }));
       }
     }
@@ -447,10 +536,11 @@ export const backupAutoSyncService = {
   runOnce: async ({ token, deviceId, childId, settings, onProgress } = {}) => {
     const resolvedSettings = mergeSettings(settings || (await backupAutoSyncService.getSettings()));
 
-    if (!resolvedSettings.enabled || !token || !deviceId || isRunning) {
-      return { skipped: true };
+    if (!resolvedSettings.enabled || stopRequested || !token || !deviceId || isRunning) {
+      return { skipped: true, skippedReason: !resolvedSettings.enabled || stopRequested ? STOPPED_REASON : undefined };
     }
 
+    stopRequested = false;
     isRunning = true;
 
     try {
@@ -468,6 +558,10 @@ export const backupAutoSyncService = {
         healthTimeout.cleanup();
       }
 
+      if (!(await isAutoSyncEnabled(resolvedSettings))) {
+        return getStopResult();
+      }
+
       await backupQueueMetaStore.merge({
         last_autosync_phase: "scanning",
       });
@@ -477,12 +571,29 @@ export const backupAutoSyncService = {
         childId,
         settings: resolvedSettings,
       });
+
+      if (scanResult.skippedReason === STOPPED_REASON || !(await isAutoSyncEnabled(resolvedSettings))) {
+        await backupQueueMetaStore.merge({
+          last_autosync_phase: "stopped",
+          last_autosync_running: false,
+        });
+        return {
+          ...scanResult,
+          completed: [],
+        };
+      }
+
       await backupQueueMetaStore.merge({
         last_autosync_phase: "uploading",
       });
 
       const completed = await backupService.resumeQueue(token, {
+        shouldContinue: async () => backupAutoSyncService.isEnabled(),
         onProgress: async (progress) => {
+          if (!(await backupAutoSyncService.isEnabled())) {
+            return;
+          }
+
           await backupQueueMetaStore.merge({
             last_autosync_phase: progress.phase || "uploading",
             last_autosync_current_file: progress.item?.file_name || "",
@@ -492,6 +603,18 @@ export const backupAutoSyncService = {
           onProgress?.(progress);
         },
       });
+
+      if (!(await isAutoSyncEnabled(resolvedSettings))) {
+        await backupQueueMetaStore.merge({
+          last_autosync_phase: "stopped",
+          last_autosync_running: false,
+        });
+        return {
+          ...scanResult,
+          completed,
+          skippedReason: STOPPED_REASON,
+        };
+      }
 
       await backupQueueMetaStore.merge({
         last_autosync_at: new Date().toISOString(),
@@ -506,22 +629,34 @@ export const backupAutoSyncService = {
         completed,
       };
     } catch (error) {
+      const stopped = error?.message === STOPPED_REASON || stopRequested;
+
       await backupQueueMetaStore.merge({
-        last_autosync_error: error?.message || "Auto sync failed",
-        last_autosync_phase: "failed",
+        last_autosync_error: stopped ? "" : error?.message || "Auto sync failed",
+        last_autosync_phase: stopped ? "stopped" : "failed",
         last_autosync_running: false,
       });
+
+      if (stopped) {
+        return getStopResult();
+      }
+
       throw error;
     } finally {
       isRunning = false;
     }
   },
 
-  /**
-   * Manually scan device media without waiting for auto-sync interval
-   * Returns detailed scan results for UI display
-   */
   scanMediaNow: async ({ deviceId, childId, settings } = {}) => {
+    const resolvedSettings = mergeSettings(settings || (await backupAutoSyncService.getSettings()));
+
+    if (!resolvedSettings.enabled || stopRequested) {
+      return {
+        ...getStopResult(),
+        permissionError: false,
+      };
+    }
+
     if (!deviceId) {
       return {
         queued: [],
@@ -532,8 +667,7 @@ export const backupAutoSyncService = {
     }
 
     try {
-      // Ensure we have permission before scanning
-      const scanResult = await scanMediaAssets(mergeSettings(settings));
+      const scanResult = await scanMediaAssets(resolvedSettings);
 
       if (scanResult.skippedReason) {
         const isPermissionError = scanResult.skippedReason.includes("permission");
@@ -545,7 +679,13 @@ export const backupAutoSyncService = {
         };
       }
 
-      // Queue the scanned assets
+      if (!(await isAutoSyncEnabled(resolvedSettings))) {
+        return {
+          ...getStopResult(),
+          permissionError: false,
+        };
+      }
+
       await backupQueueStore.init();
       const allQueued = await backupQueueStore.getAll();
       const queuedMap = new Map(allQueued.map((item) => [item.id, item]));
@@ -554,6 +694,13 @@ export const backupAutoSyncService = {
       const migrationPromises = [];
 
       for (const asset of scanResult.assets) {
+        if (!(await isAutoSyncEnabled(resolvedSettings))) {
+          return {
+            ...getStopResult(),
+            permissionError: false,
+          };
+        }
+
         const existing = queuedMap.get(asset.id);
         if (!existing) {
           newAssets.push(asset);
@@ -573,7 +720,6 @@ export const backupAutoSyncService = {
         await Promise.all(migrationPromises);
       }
 
-      // Update metadata
       await backupQueueMetaStore.merge({
         last_autosync_manual_scan_at: new Date().toISOString(),
         last_autosync_scan_count: scanResult.assets.length,
@@ -600,22 +746,29 @@ export const backupAutoSyncService = {
         stats: typeStats,
       };
     } catch (error) {
+      const stopped = error?.message === STOPPED_REASON || stopRequested;
+
       await backupQueueMetaStore.merge({
-        last_autosync_scan_error: error?.message || "Manual scan failed",
+        last_autosync_scan_error: stopped ? "" : error?.message || "Manual scan failed",
+        last_autosync_phase: stopped ? "stopped" : undefined,
+        last_autosync_running: false,
       });
 
       return {
         queued: [],
         scanned: 0,
-        error: error?.message,
+        error: stopped ? undefined : error?.message,
+        skippedReason: stopped ? STOPPED_REASON : undefined,
         permissionError: error?.message?.includes("permission"),
       };
     }
   },
 
-  /**
-   * Get current media library permission status
-   */
+  isEnabled: async () => {
+    const settings = await backupAutoSyncService.getSettings();
+    return Boolean(settings.enabled) && !stopRequested;
+  },
+
   getPermissionStatus: async () => {
     const result = await ensureMediaLibraryPermissions();
     return {
@@ -636,10 +789,6 @@ export const backupAutoSyncService = {
     };
   },
 
-  /**
-   * Diagnostic function to check what media is on the device
-   * Useful for debugging why photos/videos aren't being scanned
-   */
   getDiagnostics: async () => {
     const diagnostics = {
       timestamp: new Date().toISOString(),
@@ -655,7 +804,6 @@ export const backupAutoSyncService = {
     };
 
     try {
-      // Check permission
       const permCheck = await ensureMediaLibraryPermissions();
       diagnostics.hasPermissions = permCheck.granted;
 
@@ -664,9 +812,8 @@ export const backupAutoSyncService = {
         return diagnostics;
       }
 
-      // Scan ALL media without any filters to see what's there
       const response = await MediaLibrary.getAssetsAsync({
-        first: 500, // Get first 500 items
+        first: 500,
       });
 
       if (Array.isArray(response?.assets)) {
@@ -681,7 +828,6 @@ export const backupAutoSyncService = {
           modificationTime: asset.modificationTime,
         }));
 
-        // Count by type
         for (const asset of response.assets) {
           if (asset.mediaType === "photo") {
             diagnostics.photoCount += 1;

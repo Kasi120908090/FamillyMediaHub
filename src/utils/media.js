@@ -11,6 +11,28 @@ export const getMediaUri = (item) =>
     item?.file_path
   );
 
+export const mediaRequiresAuth = (item) =>
+  Boolean(
+    item?.requires_auth ||
+      item?.source_table === "backup_files" ||
+      String(item?.file_path || "").startsWith("/backup/file/")
+  );
+
+export const getMediaSource = (item, token, uriOverride) => {
+  const uri = uriOverride || getMediaUri(item);
+  if (!uri) {
+    return null;
+  }
+
+  const source = { uri };
+  if (mediaRequiresAuth(item) && token) {
+    source.headers = {
+      Authorization: `Bearer ${token}`,
+    };
+  }
+  return source;
+};
+
 const getContentType = (uri) => {
   if (!uri) {
     return "auto";

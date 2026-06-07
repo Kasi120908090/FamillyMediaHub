@@ -27,6 +27,7 @@ import {
 import { useProfile } from "../../context/ProfileContext";
 import { useTheme } from "../../context/ThemeContext";
 import { resolveMediaUri } from "../../services/api";
+import { getMediaSource } from "../../utils/media";
 import { borderRadius, layout, spacing, typography } from "../../theme/designSystem";
 import { moderateScale } from "../../theme/responsive";
 
@@ -110,6 +111,7 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
     selectedChild,
     canManageMedia,
     isChildAccount,
+    authToken,
     moveMediaToRecycleBin,
   } = useProfile();
   const renderCounter = useRef(0);
@@ -134,6 +136,10 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
   const [viewerVisible, setViewerVisible] = useState(false);
   const [viewerIndex, setViewerIndex] = useState(0);
   const [sceneReady, setSceneReady] = useState(false);
+  const getAuthenticatedImageSource = useCallback(
+    (item) => getMediaSource(item, authToken, getImageUri(item)),
+    [authToken]
+  );
 
   useEffect(() => {
     setSceneReady(false);
@@ -145,10 +151,10 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
   }, []);
 
   const images = useMemo(() => {
-    console.time("[Perf] Images filteredImages");
     const result = (sceneReady ? mediaItems : [])
       .filter(
         (item) => {
+          if (!item) return false;
           if (!isChildAccount || !selectedChildId) {
             return true;
           }
@@ -158,7 +164,7 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
         }
       )
         .filter(
-          (item) => item.category === "images" || item.content_type?.startsWith("image/")
+          (item) => item?.category === "images" || item?.content_type?.startsWith("image/")
         )
         .filter((item) => {
           const itemDate = getItemDate(item);
@@ -166,22 +172,19 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
           const isBeforeEnd = endDate ? itemDate <= getEndOfDay(endDate) : true;
           return isAfterStart && isBeforeEnd;
         })
-        .filter((item) =>
-          (item.original_file_name || item.stored_file_name || "")
-            .toLowerCase()
-            .includes(searchQuery.toLowerCase())
-        )
+        .filter((item) => {
+          const name = item?.original_file_name || item?.stored_file_name || "";
+          return name.toLowerCase().includes(searchQuery.toLowerCase());
+        })
         .sort((firstItem, secondItem) =>
           isDateReversed
             ? getItemDate(firstItem) - getItemDate(secondItem)
             : getItemDate(secondItem) - getItemDate(firstItem)
         );
-    console.timeEnd("[Perf] Images filteredImages");
     return result;
   }, [endDate, isChildAccount, mediaItems, sceneReady, searchQuery, selectedChildId, startDate, isDateReversed]);
 
   const groupedImages = useMemo(() => {
-    console.time("[Perf] Images groupedImages");
     const groups = {};
 
     images.forEach((item) => {
@@ -195,13 +198,11 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
     const result = Object.values(groups).sort((a, b) =>
       isDateReversed ? a.date - b.date : b.date - a.date
     );
-    console.timeEnd("[Perf] Images groupedImages");
     return result;
   }, [images, isDateReversed]);
 
   const layoutSections = useMemo(
     () => {
-      console.time("[Perf] Images layoutSections");
       const result = groupedImages.map((section) => {
         const rows = [];
 
@@ -220,7 +221,6 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
           rows,
         };
       });
-      console.timeEnd("[Perf] Images layoutSections");
       return result;
     },
     [groupedImages, isGridView]
@@ -265,13 +265,13 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
               >
                 {isGridView ? (
                   <>
-                    <CachedImage source={{ uri: getImageUri(item) }} style={styles.tileImage} />
+                    <CachedImage source={getAuthenticatedImageSource(item)} style={styles.tileImage} />
                     <View style={styles.tileShade} />
                     <MediaBadge icon="image-outline" />
                   </>
                 ) : (
                   <View style={styles.listTileContent}>
-                    <CachedImage source={{ uri: getImageUri(item) }} style={styles.listTileImage} />
+                    <CachedImage source={getAuthenticatedImageSource(item)} style={styles.listTileImage} />
                     <View style={styles.listTileText}>
                       <Text style={[styles.listTileTitle, { color: theme.text }]} numberOfLines={1}>
                         {item.original_file_name || item.stored_file_name || "Photo"}
@@ -294,7 +294,7 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
         ))}
       </FadeInView>
     ),
-    [isGridView, openViewer, theme]
+    [getAuthenticatedImageSource, isGridView, openViewer, theme]
   );
 
   const hasActiveFilters = Boolean(startDate || endDate || !isGridView || isDateReversed);
@@ -369,61 +369,6 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
             </View>
           </>
         }
-        renderItem={({ item: section, index }) => (
-          <FadeInView style={styles.section} delay={Math.min(index * 30, 150)}>
-            <View style={styles.sectionHeader}>
-              <View>
-                <Text style={[styles.sectionTitle, { color: theme.text }]}>{section.title}</Text>
-              </View>
-              <Text style={[styles.sectionMeta, { color: theme.subText }]}>
-                {section.data.length} Photos
-              </Text>
-            </View>
-
-            {section.rows.map((row) => (
-              <View key={row.id} style={styles.pairRow}>
-                {row.items.map((item, itemIndex) => (
-                  <TouchableOpacity
-                    key={getImageTileKey(item, itemIndex, row.id)}
-                    activeOpacity={0.9}
-                    onPress={() => openViewer(item)}
-                    style={[
-                      isGridView ? styles.pairTile : styles.listTile,
-                      { backgroundColor: theme.card },
-                      isGridView && softShadow,
-                    ]}
-                  >
-                    {isGridView ? (
-                      <>
-                        <CachedImage source={{ uri: getImageUri(item) }} style={styles.tileImage} />
-                        <View style={styles.tileShade} />
-                        <MediaBadge icon="image-outline"></MediaBadge>
-                      </>
-                    ) : (
-                      <View style={styles.listTileContent}>
-                        <CachedImage source={{ uri: getImageUri(item) }} style={styles.listTileImage} />
-                        <View style={styles.listTileText}>
-                          <Text style={[styles.listTileTitle, { color: theme.text }]} numberOfLines={1}>
-                            {item.original_file_name || item.stored_file_name || "Photo"}
-                          </Text>
-                          <Text style={[styles.listTileMeta, { color: theme.subText }]}>
-                            {formatShortDate(getItemDate(item))}
-                          </Text>
-                        </View>
-                      </View>
-                    )}
-                  </TouchableOpacity>
-                ))}
-
-                {isGridView
-                  ? Array.from({ length: 4 - row.items.length }).map((_, spacerIndex) => (
-                      <View key={`spacer-${row.id}-${spacerIndex}`} style={styles.pairTileSpacer} />
-                    ))
-                  : null}
-              </View>
-            ))}
-          </FadeInView>
-        )}
         ListEmptyComponent={
           !sceneReady ? null :
           <View style={[styles.emptyState, { backgroundColor: theme.card, borderColor: theme.border }]}>
@@ -454,6 +399,7 @@ export default function ImagesScreen({ navigation, onOpenMenu }) {
         onClose={() => setViewerVisible(false)}
         onDelete={canManageMedia ? moveMediaToRecycleBin : null}
         getImageUri={getImageUri}
+        getImageSource={getAuthenticatedImageSource}
         getImageTitle={(item) => item?.original_file_name || item?.stored_file_name || "Image"}
       />
 

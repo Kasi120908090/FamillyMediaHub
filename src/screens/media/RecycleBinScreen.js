@@ -1,4 +1,4 @@
-import React, { useMemo } from "react";
+import React, { useCallback, useMemo } from "react";
 import {
   FlatList,
   StyleSheet,
@@ -55,20 +55,22 @@ const formatDeletedDate = (dateString) => {
 };
 
 export default function RecycleBinScreen({ navigation, onOpenMenu }) {
-  const { viewerProfile, recycleBinItems, canManageMedia, restoreMediaFromRecycleBin } = useProfile();
+  const { viewerProfile, recycleBinItems = [], canManageMedia, restoreMediaFromRecycleBin } = useProfile();
   const { theme } = useTheme();
 
   const items = useMemo(
-    () =>
-      [...recycleBinItems].sort(
+    () => {
+      const binItems = Array.isArray(recycleBinItems) ? recycleBinItems : [];
+      return [...binItems].sort(
         (first, second) =>
           new Date(second.deleted_at || 0).getTime() -
           new Date(first.deleted_at || 0).getTime()
-      ),
+      );
+    },
     [recycleBinItems]
   );
 
-  const renderPreview = (item) => {
+  const renderPreview = useCallback((item) => {
     const category = getNormalizedCategory(item);
 
     if (category === "image") {
@@ -84,7 +86,34 @@ export default function RecycleBinScreen({ navigation, onOpenMenu }) {
         <Ionicons name="document-text" size={24} color="#2563EB" />
       </View>
     );
-  };
+  }, []);
+
+  const renderItem = useCallback(({ item }) => {
+    const category = getNormalizedCategory(item);
+
+    return (
+      <View style={[styles.itemCard, { backgroundColor: theme.card }]}>
+        <View style={styles.previewWrap}>{renderPreview(item)}</View>
+        <View style={styles.itemText}>
+          <Text style={[styles.itemTitle, { color: theme.text }]}>
+            Deleted {category}
+          </Text>
+          <Text style={[styles.itemMeta, { color: theme.subText }]}>
+            {formatDeletedDate(item.deleted_at)}
+          </Text>
+        </View>
+        {canManageMedia ? (
+          <TouchableOpacity
+            style={[styles.restoreButton, { backgroundColor: theme.primary }]}
+            onPress={() => restoreMediaFromRecycleBin(item)}
+            activeOpacity={0.85}
+          >
+            <Ionicons name="refresh" size={17} color={theme.buttonText} />
+          </TouchableOpacity>
+        ) : null}
+      </View>
+    );
+  }, [canManageMedia, renderPreview, restoreMediaFromRecycleBin, theme]);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -93,7 +122,7 @@ export default function RecycleBinScreen({ navigation, onOpenMenu }) {
         onOpenMenu={onOpenMenu}
         rightContent={
           <TouchableOpacity onPress={() => navigation.navigate("Profile")} activeOpacity={0.85}>
-            <ThemedAvatar uri={viewerProfile.image} name={viewerProfile.name} style={styles.avatar} />
+            <ThemedAvatar uri={viewerProfile?.image} name={viewerProfile?.name} style={styles.avatar} />
           </TouchableOpacity>
         }
       />
@@ -102,32 +131,7 @@ export default function RecycleBinScreen({ navigation, onOpenMenu }) {
         data={items}
         keyExtractor={getRecycleItemKey}
         contentContainerStyle={styles.content}
-        renderItem={({ item }) => {
-          const category = getNormalizedCategory(item);
-
-          return (
-            <View style={[styles.itemCard, { backgroundColor: theme.card }]}>
-              <View style={styles.previewWrap}>{renderPreview(item)}</View>
-              <View style={styles.itemText}>
-                <Text style={[styles.itemTitle, { color: theme.text }]}>
-                  Deleted {category}
-                </Text>
-                <Text style={[styles.itemMeta, { color: theme.subText }]}>
-                  {formatDeletedDate(item.deleted_at)}
-                </Text>
-              </View>
-              {canManageMedia ? (
-                <TouchableOpacity
-                  style={[styles.restoreButton, { backgroundColor: theme.primary }]}
-                  onPress={() => restoreMediaFromRecycleBin(item)}
-                  activeOpacity={0.85}
-                >
-                  <Ionicons name="refresh" size={17} color={theme.buttonText} />
-                </TouchableOpacity>
-              ) : null}
-            </View>
-          );
-        }}
+        renderItem={renderItem}
         ListEmptyComponent={
           <View style={[styles.emptyState, { backgroundColor: theme.card }]}>
             <Ionicons name="trash-outline" size={42} color={theme.primary} />

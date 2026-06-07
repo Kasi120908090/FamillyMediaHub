@@ -1,5 +1,24 @@
 import * as MediaLibrary from "expo-media-library";
 
+const MEDIA_PERMISSION_TYPES = ["photo", "video"];
+
+const hasReadableMediaPermission = (result) =>
+  Boolean(
+    result?.granted ||
+      result?.status === "granted" ||
+      result?.accessPrivileges === "all" ||
+      result?.accessPrivileges === "limited"
+  );
+
+const getPermissionPayload = (result, extra = {}) => ({
+  granted: hasReadableMediaPermission(result),
+  source: "media-library",
+  status: result?.status,
+  accessPrivileges: result?.accessPrivileges,
+  canAskAgain: result?.canAskAgain !== false,
+  ...extra,
+});
+
 /**
  * Request media library permissions with proper error handling
  */
@@ -13,10 +32,10 @@ export const requestMediaLibraryPermissions = async () => {
       };
     }
 
-    const result = await MediaLibrary.requestPermissionsAsync();
+    const result = await MediaLibrary.requestPermissionsAsync(false, MEDIA_PERMISSION_TYPES);
     
-    if (result?.granted) {
-      return { granted: true, source: "media-library" };
+    if (hasReadableMediaPermission(result)) {
+      return getPermissionPayload(result);
     }
     
     if (result?.canAskAgain === false) {
@@ -50,12 +69,8 @@ export const requestMediaLibraryPermissions = async () => {
 export const checkMediaLibraryPermissions = async () => {
   try {
     if (MediaLibrary?.getPermissionsAsync) {
-      const result = await MediaLibrary.getPermissionsAsync();
-      return {
-        granted: Boolean(result?.granted),
-        source: "media-library",
-        canAskAgain: result?.canAskAgain !== false
-      };
+      const result = await MediaLibrary.getPermissionsAsync(false, MEDIA_PERMISSION_TYPES);
+      return getPermissionPayload(result);
     }
 
     return { 
@@ -80,7 +95,7 @@ export const ensureMediaLibraryPermissions = async () => {
   const check = await checkMediaLibraryPermissions();
   
   if (check.granted) {
-    return { granted: true, alreadyGranted: true };
+    return { ...check, granted: true, alreadyGranted: true };
   }
 
   if (!check.canAskAgain) {
@@ -92,4 +107,4 @@ export const ensureMediaLibraryPermissions = async () => {
   }
 
   return await requestMediaLibraryPermissions();
-};
+}; 
