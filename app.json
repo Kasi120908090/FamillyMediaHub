@@ -13,13 +13,11 @@
       "backgroundColor": "#ffffff"
     },
     "ios": {
+      "bundleIdentifier": "com.pratap2.familymediahub",
       "supportsTablet": true,
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Family Media Hub scans your photos and videos for LAN backup.",
-        "UIBackgroundModes": [
-          "fetch",
-          "processing"
-        ]
+        "UIBackgroundModes": ["fetch", "processing"]
       }
     },
     "android": {
@@ -38,7 +36,7 @@
         "backgroundColor": "#ffffff"
       },
       "edgeToEdgeEnabled": true,
-      "package": "com.pratap2.FamilyMediaHub"
+      "package": "com.pratap2.familyMediaHub"
     },
     "web": {
       "favicon": "./assets/favicon.png"
