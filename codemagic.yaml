@@ -1,0 +1,23 @@
+workflows:
+  ios-release:
+    name: Family Media Hub iOS Release
+
+    environment:
+      node: 20
+
+    scripts:
+      - name: Install dependencies
+        script: |
+          npm ci
+
+      - name: Install EAS CLI
+        script: |
+          npm install -g eas-cli
+
+      - name: Verify Expo config
+        script: |
+          npx expo config --type public
+
+    artifacts:
+      - $HOME/Library/Developer/Xcode/Archives/**/*.xcarchive
+      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.ipa
