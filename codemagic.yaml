@@ -14,10 +14,17 @@ workflows:
         script: |
           npm install -g eas-cli
 
-      - name: Verify Expo config
+      - name: Login to Expo
+        script: |
+          eas whoami || eas login --token $EXPO_TOKEN
+
+      - name: Verify Expo Config
         script: |
           npx expo config --type public
 
+      - name: Build iOS
+        script: |
+          eas build --platform ios --non-interactive
+
     artifacts:
-      - $HOME/Library/Developer/Xcode/Archives/**/*.xcarchive
-      - $HOME/Library/Developer/Xcode/DerivedData/**/Build/**/*.ipa
+      - "*.ipa"
