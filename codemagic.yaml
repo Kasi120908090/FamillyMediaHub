@@ -3,27 +3,37 @@ workflows:
     name: Family Media Hub iOS Release
 
     environment:
+      xcode: latest
+      cocoapods: default
       node: 20
-      groups:
-        - expo
 
     scripts:
       - name: Install dependencies
         script: |
           npm ci
 
-      - name: Install EAS CLI
+      - name: Install Expo CLI
         script: |
-          npm install -g eas-cli
+          npm install -g expo-cli
 
       - name: Verify Expo Config
         script: |
           npx expo config --type public
 
-      - name: Build iOS
+      - name: Generate iOS Native Project
         script: |
-          export EXPO_TOKEN=$EXPO_TOKEN
-          eas build --platform ios --non-interactive
+          npx expo prebuild --platform ios --non-interactive
+
+      - name: Install CocoaPods
+        script: |
+          cd ios
+          pod install
+
+      - name: Build IPA
+        script: |
+          xcode-project build-ipa \
+            --workspace ios/*.xcworkspace \
+            --scheme FamilyMediaHub
 
     artifacts:
-      - "*.ipa"
+      - build/ios/ipa/*.ipa
