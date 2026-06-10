@@ -32,8 +32,9 @@ workflows:
       - name: Build IPA
         script: |
           xcode-project build-ipa \
-            --workspace ios/*.xcworkspace \
-            --scheme FamilyMediaHub
+            --workspace "ios/*.xcworkspace" \
+            --scheme "FamilyMediaHub" \
+            --configuration "Release" \
 
     artifacts:
       - build/ios/ipa/*.ipa
