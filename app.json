@@ -18,10 +18,7 @@
       "infoPlist": {
         "NSPhotoLibraryUsageDescription": "Family Media Hub scans your photos and videos for LAN backup.",
         "UIBackgroundModes": [
-          "fetch",
-          "processing",
-          "fetch",
-          "processing"
+          "fetch"
         ],
         "ITSAppUsesNonExemptEncryption": false
       }
